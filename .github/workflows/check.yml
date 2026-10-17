@@ -1,0 +1,32 @@
+name: Check userscript
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Syntax
+        run: node --check twitch-adblock.user.js
+
+      - name: Version consistency (@version, VERSION, CHANGELOG)
+        run: |
+          HEADER=$(grep -oP '^// @version\s+\K[\d.]+' twitch-adblock.user.js)
+          CONST=$(grep -oP "const VERSION = '\K[\d.]+" twitch-adblock.user.js)
+          echo "@version: $HEADER  VERSION: $CONST"
+          test "$HEADER" = "$CONST" || { echo "::error::@version ($HEADER) and VERSION ($CONST) differ"; exit 1; }
+          grep -q "^## \[$HEADER\]" CHANGELOG.md || { echo "::error::CHANGELOG.md has no entry for $HEADER"; exit 1; }
+
+      - name: Userscript header
+        run: |
+          for key in '@name' '@namespace' '@version' '@match' '@updateURL' '@downloadURL'; do
+            grep -q "^// $key" twitch-adblock.user.js || { echo "::error::missing $key"; exit 1; }
+          done
