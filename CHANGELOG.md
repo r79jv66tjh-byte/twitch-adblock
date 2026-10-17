@@ -3,6 +3,13 @@
 🇬🇧 English / 🇩🇪 Deutsch – each entry is listed in both languages.
 Format: [Keep a Changelog](https://keepachangelog.com/), versions: [SemVer](https://semver.org/).
 
+## [2.0.2] – 2026-10-17
+
+- EN: Recognises Twitch's newer stream list address (`/api/v2/channel/hls/`) – the ad-free replacement stream and the "offline" diagnosis work again; playlists are matched more tolerantly
+- EN: "Time saved" uses at least the measured length of the ad break; the log records which playlist addresses the player uses (without access tokens)
+- DE: Erkennt Twitchs neuere Adresse der Stream-Liste (`/api/v2/channel/hls/`) – werbefreier Ersatz-Stream und „Offline“-Diagnose funktionieren wieder; Playlists werden toleranter zugeordnet
+- DE: „Zeit gespart“ zählt mindestens die gemessene Dauer der Werbepause; das Protokoll hält fest, welche Playlist-Adressen der Player nutzt (ohne Zugangsdaten)
+
 ## [2.0.1] – 2026-10-17
 
 - EN: Emergency mode now also hides Twitch's ad buttons ("Ad ⓘ", "Learn more"), which Twitch shows with changing class names

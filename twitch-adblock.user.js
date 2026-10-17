@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Adblock (Stream + Banner)
 // @namespace    local.twitch-adblock
-// @version      2.0.1
+// @version      2.0.2
 // @description  Bypasses pre-/mid-roll ads in the Twitch stream (playlist swap) and hides ad banners. Ad counter with time saved, emergency mode, DE/EN.
 // @description:de Umgeht Pre-/Mid-Roll-Werbung im Twitch-Stream (Playlist-Austausch) und blendet Werbebanner aus. Werbe-Zähler mit gesparter Zeit, Notfall-Modus, DE/EN.
 // @license      MIT
@@ -94,12 +94,30 @@
       }
     }
 
-    // Gesparte Zeit der Pause: Summe der Spot-Längen, sonst gemessene Dauer (max. 10 min)
+    // Gesparte Zeit der Pause: Summe der Spot-Längen, mindestens aber die gemessene Dauer (max. 10 min)
     function adBreakSeconds() {
       let sum = 0;
       for (const d of adSpots.values()) sum += d;
-      if (!sum) sum = (Date.now() - adStart) / 1000;
+      sum = Math.max(sum, (Date.now() - adStart) / 1000);
       return Math.round(Math.min(sum, 600));
+    }
+
+    // Stream-Liste („usher“): alte und neue Adressform, z. B. /api/channel/hls/ und /api/v2/channel/hls/
+    const USHER_RE = /usher\.ttvnw\.net(\/api\/(?:v\d+\/)?channel\/hls\/)/;
+    let usherPath = '/api/channel/hls/';
+    let lastChannel = null;
+
+    // Für das Protokoll: einmalig festhalten, welche Playlist-Adressen der Player nutzt (ohne Zugangsdaten)
+    const seenKinds = new Set();
+    function logPlaylistSeen(kind, url) {
+      if (seenKinds.has(kind)) return;
+      seenKinds.add(kind);
+      let safe = url;
+      try {
+        const u = new URL(url);
+        safe = u.host + u.pathname.split('/').map((p) => (p.length > 24 ? p.slice(0, 8) + '…' : p)).join('/');
+      } catch (e) { safe = String(url).split('?')[0].slice(0, 80); }
+      log('info', 'playlistSeen', { kind, url: safe });
     }
 
     const GQL_QUERY = 'query PlaybackAccessToken_Template($login: String!, $isLive: Boolean!, $vodID: ID!, $isVod: Boolean!, $playerType: String!, $platform: String!) { streamPlaybackAccessToken(channelName: $login, params: {platform: $platform, playerBackend: "mediaplayer", playerType: $playerType}) @include(if: $isLive) { value signature authorization { isForbidden forbiddenReasonCode } __typename } videoPlaybackAccessToken(id: $vodID, params: {platform: $platform, playerBackend: "mediaplayer", playerType: $playerType}) @include(if: $isVod) { value signature __typename } }';
@@ -141,6 +159,7 @@
 
     function pickVariant(variants, info) {
       if (!variants.length) return null;
+      if (!info.res) return variants[0]; // Auflösung unbekannt: beste Qualität (steht bei Twitch zuerst)
       const exact = variants.find(v => v.res === info.res && Math.round(v.fps) === Math.round(info.fps))
         || variants.find(v => v.res === info.res);
       if (exact) return exact;
@@ -216,7 +235,7 @@
           sig: tok.signature, supported_codecs: 'avc1', token: tok.value,
           transcode_mode: 'cbr_v1', cdm: 'wv',
         });
-        const master = await realFetch('https://usher.ttvnw.net/api/channel/hls/' + encodeURIComponent(channel) + '.m3u8?' + params);
+        const master = await realFetch('https://usher.ttvnw.net' + usherPath + encodeURIComponent(channel) + '.m3u8?' + params);
         if (!master.ok) { log('warn', 'backupUsherFail', { playerType, status: master.status }); return null; }
         return { variants: parseMaster(await master.text(), master.url), time: Date.now(), hasAds: false };
       } catch (e) {
@@ -263,7 +282,10 @@
       const url = typeof input === 'string' ? input : (input && input.url) || String(input);
 
       // Master-Playlist: Kanal und Auflösungen der Varianten merken
-      if (url.includes('usher.ttvnw.net/api/channel/hls/')) {
+      const usher = url.match(USHER_RE);
+      if (usher) {
+        usherPath = usher[1];
+        logPlaylistSeen('master', url);
         const m = url.match(/\/hls\/([^/.?]+)\.m3u8/);
         const channel = m ? decodeURIComponent(m[1]).toLowerCase() : null;
         const res = await realFetch(input, init);
@@ -274,13 +296,19 @@
         }
         const text = await res.text();
         const variants = parseMaster(text, url);
-        for (const v of variants) streams.set(v.url, { channel, res: v.res, fps: v.fps });
+        for (const v of variants) {
+          const info = { channel, res: v.res, fps: v.fps };
+          streams.set(v.url, info);
+          streams.set(v.url.split('?')[0], info);
+        }
+        lastChannel = channel;
         log('info', 'usherOk', { channel, variants: variants.length });
         return rebuild(res, text);
       }
 
       // Media-Playlist: auf Werbung prüfen
       if (url.includes('.m3u8') && (streams.has(url) || url.includes('ttvnw.net'))) {
+        logPlaylistSeen('media', url);
         const res = await realFetch(input, init);
         if (!res.ok) {
           if (Date.now() - lastMediaFailLog > 60 * 1000) {
@@ -299,7 +327,10 @@
             notify({ type: 'ad-start' });
           }
           collectAdSpots(text);
-          const info = streams.get(url);
+          // Playlist-Adresse nicht exakt bekannt? Dann den zuletzt geladenen Kanal nehmen
+          const info = streams.get(url) || streams.get(url.split('?')[0])
+            || (lastChannel ? { channel: lastChannel, res: null, fps: 0 } : null);
+          if (info && !streams.has(url)) logOnce('mediaUnmatched', 'info', 'mediaUnmatched', { channel: info.channel });
           const replacement = info && info.channel ? await getBackupPlaylist(info) : null;
           if (replacement === null) logOnce('stripped', 'info', 'stripped', {});
           text = replacement !== null ? replacement : stripAds(text);
@@ -556,7 +587,7 @@
   // Zähler-Box mit Panel, Melde-Funktion, Statistik und Einstellungen
   // (alles im localStorage von twitch.tv gespeichert)
   // ---------------------------------------------------------------------------
-  const VERSION = '2.0.1';
+  const VERSION = '2.0.2';
   const REPO_URL = 'https://github.com/r79jv66tjh-byte/twitch-adblock';
   const RAW_URL = 'https://raw.githubusercontent.com/r79jv66tjh-byte/twitch-adblock/main/twitch-adblock.user.js';
   const ISSUE_URL = REPO_URL + '/issues/new?template=bug_report.yml';
@@ -575,8 +606,8 @@
 
   // Kurzinfo „Was ist neu“ zur aktuellen Version
   const WHATS_NEW = {
-    de: 'Notfall-Modus blendet jetzt auch Twitchs Werbe-Knöpfe („Werbung ⓘ“, „Weitere Informationen“) aus',
-    en: 'emergency mode now also hides Twitch\'s ad buttons ("Ad ⓘ", "Learn more")',
+    de: 'Ersatz-Stream funktioniert wieder mit Twitchs neuer Stream-Adresse, genauere „Zeit gespart“, bessere Diagnose',
+    en: 'replacement stream works again with Twitch\'s new stream address, more accurate "time saved", better diagnostics',
   };
 
   // Datum in Ortszeit (für „Heute“ und den Verlauf)
@@ -791,6 +822,8 @@
         backupOk: (d) => 'Werbefreier Ersatz-Stream aktiv (' + d.playerType + ')',
         stripped: () => 'Kein werbefreier Ersatz-Stream – Werbung wird herausgeschnitten',
         vodAd: () => 'Werbung in Aufzeichnung (VOD) herausgeschnitten',
+        playlistSeen: (d) => 'Player nutzt ' + (d.kind === 'master' ? 'Stream-Liste' : 'Playlist') + ': ' + d.url,
+        mediaUnmatched: (d) => 'Playlist-Adresse nicht zugeordnet – nutze zuletzt geladenen Kanal ' + d.channel,
         exception: (d) => 'Fehler im Script, Stream lädt ohne Filter weiter: ' + d.message,
         adBreak: (d) => 'Werbepause blockiert (' + modeText(d.mode) + (d.seconds ? ', ' + fmtDur(d.seconds) + ' gespart' : '') + ')',
         leakAuto: () => 'Werbung durchgerutscht (von Twitch angezeigt)',
@@ -955,6 +988,8 @@
         backupOk: (d) => 'Ad-free replacement stream active (' + d.playerType + ')',
         stripped: () => 'No ad-free replacement stream – ads are being cut out',
         vodAd: () => 'Ad in recording (VOD) cut out',
+        playlistSeen: (d) => 'Player uses ' + (d.kind === 'master' ? 'stream list' : 'playlist') + ': ' + d.url,
+        mediaUnmatched: (d) => 'Playlist address not matched – using last loaded channel ' + d.channel,
         exception: (d) => 'Script error, stream continues without filter: ' + d.message,
         adBreak: (d) => 'Ad break blocked (' + modeText(d.mode) + (d.seconds ? ', ' + fmtDur(d.seconds) + ' saved' : '') + ')',
         leakAuto: () => 'Ad slipped through (shown by Twitch)',
