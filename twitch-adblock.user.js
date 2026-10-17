@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Adblock (Stream + Banner)
 // @namespace    local.twitch-adblock
-// @version      2.1.1
+// @version      2.1.2
 // @description  Bypasses pre-/mid-roll ads in the Twitch stream (playlist swap) and hides ad banners. Ad counter with time saved, emergency mode, DE/EN.
 // @description:de Umgeht Pre-/Mid-Roll-Werbung im Twitch-Stream (Playlist-Austausch) und blendet Werbebanner aus. Werbe-Zähler mit gesparter Zeit, Notfall-Modus, DE/EN.
 // @license      MIT
@@ -672,7 +672,7 @@
   // Zähler-Box mit Panel, Melde-Funktion, Statistik und Einstellungen
   // (alles im localStorage von twitch.tv gespeichert)
   // ---------------------------------------------------------------------------
-  const VERSION = '2.1.1';
+  const VERSION = '2.1.2';
   const REPO_URL = 'https://github.com/r79jv66tjh-byte/twitch-adblock';
   const RAW_URL = 'https://raw.githubusercontent.com/r79jv66tjh-byte/twitch-adblock/main/twitch-adblock.user.js';
   const ISSUE_URL = REPO_URL + '/issues/new?template=bug_report.yml';
@@ -1591,12 +1591,18 @@
     add(workerSeen, t('stWorker'));
 
     // Worker fragen: kennt er die Stream-Liste, bekommt er einen Ersatz-Stream von Twitch?
-    const res = await new Promise((resolve) => {
-      selfTestResolve = resolve;
-      try { if (mainBc) mainBc.postMessage({ tabId: CONFIG.tabId, type: 'selftest' }); } catch (e) { resolve(null); }
-      setTimeout(() => resolve(null), 10000);
-    });
+    // Twitch hat oft mehrere Worker: alle Antworten sammeln und die beste nehmen
+    // (der Worker, der die Stream-Liste kennt und einen Ersatz-Stream bekommt)
+    const answers = [];
+    selfTestResolve = (msg) => answers.push(msg);
+    try { if (mainBc) mainBc.postMessage({ tabId: CONFIG.tabId, type: 'selftest' }); } catch (e) { /* egal */ }
+    for (let i = 0; i < 40 && !(answers.length && Date.now() && answers.some((a) => a.streamsKnown && a.backup !== undefined)); i++) {
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    if (answers.length) await new Promise((r) => setTimeout(r, 1000)); // Nachzügler abwarten
     selfTestResolve = null;
+    const score = (a) => (a.streamsKnown ? 2 : 0) + (a.backup ? 1 : 0);
+    const res = answers.sort((a, b) => score(b) - score(a))[0] || null;
     if (!res) {
       add(false, t('stWorkerAnswer'), t('stTimeout'));
     } else {

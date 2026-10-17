@@ -3,6 +3,11 @@
 🇬🇧 English / 🇩🇪 Deutsch – each entry is listed in both languages.
 Format: [Keep a Changelog](https://keepachangelog.com/), versions: [SemVer](https://semver.org/).
 
+## [2.1.2] - 2026-10-17
+
+- EN: Self-test waits for all video workers and uses the best answer (fixes false 'stream list not recognised' with two workers)
+- DE: Selbsttest wartet auf alle Video-Worker und nimmt die beste Antwort (behebt Fehlalarm 'Stream-Liste nicht erkannt' bei zwei Workern)
+
 ## [2.1.1] – 2026-10-17
 
 **EN** (found via a real user log)
