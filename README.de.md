@@ -64,6 +64,7 @@ Ziehe die Datei `twitch-adblock.user.js` in ein Browserfenster. Tampermonkey/Vio
 - Unten links zeigt das Script an, wie viele **Werbepausen** insgesamt abgefangen wurden (eine Werbepause kann aus mehreren Spots bestehen, gezählt wird die Pause).
 - **Verschieben:** Box an der oberen Zeile mit der Maus an die gewünschte Stelle ziehen. Die Position wird gespeichert und bleibt nach dem Neuladen erhalten.
 - **Sperren:** Auf das Schloss klicken. 🔓 = verschiebbar, 🔒 = gesperrt (kann nicht mehr versehentlich verschoben werden). Nochmal klicken entsperrt sie wieder.
+- **🛟 Notfall-Modus:** Der Rettungsring-Button schaltet ihn ein (grün) und aus (grau). Ist er an und rutscht trotzdem Werbung durch (Twitch zeigt sein „Werbung“-Label oder den Countdown), wird der Stream **stummgeschaltet und stark unscharf** gemacht, bis die Werbung vorbei ist. Danach ist alles automatisch wieder wie vorher, auch die Lautstärke. Standardmäßig an, die Einstellung wird gespeichert. Hinweis: Solange der Notfall-Modus greift, wird der Ton immer wieder stummgeschaltet. Wer den Ton während der Werbung hören will, schaltet den Modus kurz aus.
 - **Aufklappen:** Auf ▾ klicken (oder Doppelklick auf die Zeile). ▴ klappt wieder ein. Der Zustand wird gespeichert.
 - Der lila Werbe-Hinweis erscheint immer direkt über der Box (oder darunter, wenn sie ganz oben sitzt).
 - Gespeichert wird im Browser-Speicher von twitch.tv und überlebt Neuladen und Browser-Neustart. Wer die Website-Daten von Twitch löscht, setzt alles zurück.
@@ -75,7 +76,7 @@ Ziehe die Datei `twitch-adblock.user.js` in ein Browserfenster. Tampermonkey/Vio
 - **Letzte Werbepause:** Uhrzeit, Kanal und Methode (Ersatz-Stream oder herausgeschnitten).
 - **Melde-Zeile** mit drei Buttons nebeneinander:
   - **⏱ Zeitstempel:** Kopiert einen Zeitstempel in die Zwischenablage, **ohne etwas zu speichern**. Einfügen mit Strg + V, z. B.:
-    `Werbung nicht blockiert – 17.10.2026 16:23:05 – Kanal: xyz – letzte Methode: Ersatz-Stream (vor 40 s) – Script 1.6.0`
+    `Werbung nicht blockiert – 17.10.2026 16:23:05 – Kanal: xyz – letzte Methode: Ersatz-Stream (vor 40 s) – Script 1.7.0`
   - **⚠ Durchgerutscht:** Speichert die gerade gesehene Werbung im Durchgerutscht-Protokoll und zählt „Durchgerutscht“ um 1 hoch.
   - **🔗 Sync:** Koppelt die beiden Buttons. Ist Sync an (grün), löst ein Klick auf *einen* der beiden Buttons **beide** aus: Zeitstempel kopieren **und** als durchgerutscht speichern. Grau = aus, die Buttons arbeiten einzeln. Die Einstellung wird gespeichert.
 - **Automatische Erkennung:** Zeigt Twitch im Player seine eigene Werbe-Anzeige (Label „Werbung“ oder Countdown), wird das im Durchgerutscht-Protokoll gespeichert und kurz „Werbung ist durchgerutscht“ eingeblendet. Das ist ein Anhaltspunkt, keine sichere Erkennung: Nicht jede durchgerutschte Werbung wird so erkannt.

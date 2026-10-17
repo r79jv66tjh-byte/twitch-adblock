@@ -66,6 +66,7 @@ Drag the file `twitch-adblock.user.js` into a browser window. Tampermonkey/Viole
 - In the bottom left the script shows how many **ad breaks** have been blocked in total (one ad break can contain several spots; the break is counted).
 - **Move:** drag the box by its top row to wherever you like. The position is saved and survives reloads.
 - **Lock:** click the lock. 🔓 = movable, 🔒 = locked (can't be moved by accident). Click again to unlock.
+- **🛟 Emergency mode:** the lifebuoy button turns it on (green) and off (grey). When it's on and an ad still slips through (Twitch shows its "Ad" label or countdown), the stream is **muted and heavily blurred** until the ad is over. Afterwards everything returns to how it was, including the volume. On by default; the setting is saved. Note: while emergency mode is active, the sound is muted again and again – if you want to hear the ad, turn the mode off briefly.
 - **Expand:** click ▾ (or double-click the row). ▴ collapses it again. The state is saved.
 - The purple ad notice always appears directly above the box (or below it if the box is at the very top).
 - Everything is stored in twitch.tv's browser storage and survives reloads and browser restarts. Clearing Twitch's site data resets everything.
@@ -77,7 +78,7 @@ Drag the file `twitch-adblock.user.js` into a browser window. Tampermonkey/Viole
 - **Last ad break:** time, channel and method ("Ersatz-Stream" = replacement stream, "herausgeschnitten" = cut out).
 - **Report row** with three buttons side by side:
   - **⏱ Zeitstempel** (timestamp): copies a timestamp to the clipboard **without saving anything**. Paste with Ctrl + V, e.g.:
-    `Werbung nicht blockiert – 17.10.2026 16:23:05 – Kanal: xyz – letzte Methode: Ersatz-Stream (vor 40 s) – Script 1.6.0`
+    `Werbung nicht blockiert – 17.10.2026 16:23:05 – Kanal: xyz – letzte Methode: Ersatz-Stream (vor 40 s) – Script 1.7.0`
   - **⚠ Durchgerutscht** (slipped through): saves the ad you just saw to the slipped-through log and increases the "Durchgerutscht" counter by 1.
   - **🔗 Sync:** links the two buttons. With sync on (green), clicking *either* button triggers **both**: copy the timestamp **and** save it as slipped through. Grey = off, the buttons work independently. The setting is saved.
 - **Automatic detection:** if Twitch shows its own ad UI in the player (the "Ad" label or countdown), this is saved to the slipped-through log and "Werbung ist durchgerutscht" (ad slipped through) is shown briefly. This is a hint, not reliable detection: not every ad that slips through is caught this way.

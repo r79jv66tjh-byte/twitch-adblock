@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Adblock (Stream + Banner)
 // @namespace    local.twitch-adblock
-// @version      1.6.0
+// @version      1.7.0
 // @description  Umgeht Pre-/Mid-Roll-Werbung im Twitch-Stream (Playlist-Austausch) und blendet Werbebanner aus.
 // @license      MIT
 // @homepageURL https://github.com/r79jv66tjh-byte/twitch-adblock
@@ -350,6 +350,18 @@
     }
     #ttv-adblock-counter .ttv-ab-actions button:hover { background: rgba(255, 255, 255, 0.16); }
     #ttv-adblock-counter .ttv-ab-actions button.confirm { background: rgba(235, 4, 0, 0.55); color: #fff; font-weight: 600; }
+    #ttv-adblock-counter .ttv-ab-emergency { opacity: .4; filter: grayscale(1); }
+    #ttv-adblock-counter .ttv-ab-emergency.on {
+      opacity: 1; filter: none; background: rgba(0, 200, 120, 0.25);
+      box-shadow: 0 0 0 1px rgba(0, 220, 130, 0.7);
+    }
+    video.ttv-ab-blur { filter: blur(40px) brightness(0.35) !important; }
+    .ttv-ab-veil {
+      position: absolute; inset: 0; z-index: 9999;
+      display: flex; align-items: center; justify-content: center; text-align: center;
+      padding: 16px; color: #fff; font: 600 16px/1.4 system-ui, sans-serif;
+      text-shadow: 0 1px 4px rgba(0, 0, 0, .8); pointer-events: none;
+    }
     #ttv-adblock-notice {
       position: fixed; z-index: 99999; left: 12px; top: 0;
       padding: 8px 12px; border-radius: 6px;
@@ -373,7 +385,7 @@
   // Zähler-Box mit ausklappbarem Panel und Melde-Funktion
   // (alles im localStorage von twitch.tv gespeichert)
   // ---------------------------------------------------------------------------
-  const VERSION = '1.6.0';
+  const VERSION = '1.7.0';
   const STATS_KEY = 'ttvAdblockStats';
   const BOX_KEY = 'ttvAdblockCounterBox';
   const REPORTS_KEY = 'ttvAdblockReports';
@@ -410,7 +422,7 @@
     return Array.isArray(r) ? r : [];
   }
 
-  const box = Object.assign({ x: null, y: null, locked: false, expanded: false, sync: false }, loadJson(BOX_KEY, {}));
+  const box = Object.assign({ x: null, y: null, locked: false, expanded: false, sync: false, emergency: true }, loadJson(BOX_KEY, {}));
   const saveBox = () => saveJson(BOX_KEY, box);
 
   let sessionCount = 0;
@@ -452,6 +464,13 @@
     ui.root.style.left = x + 'px';
     ui.root.style.top = y + 'px';
     placeNotice();
+  }
+
+  function updateEmergency() {
+    ui.emergency.classList.toggle('on', !!box.emergency);
+    ui.emergency.title = box.emergency
+      ? 'Notfall-Modus AN: Rutscht Werbung durch, wird sie stumm und unscharf geschaltet – klicken zum Ausschalten'
+      : 'Notfall-Modus AUS – klicken zum Einschalten';
   }
 
   function updateLock() {
@@ -588,12 +607,13 @@
     ui.root = el('div');
     ui.root.id = 'ttv-adblock-counter';
 
-    // Kopfzeile: Zähler, Auf-/Zuklappen, Schloss
+    // Kopfzeile: Zähler, Notfall-Modus, Auf-/Zuklappen, Schloss
     ui.head = el('div', 'ttv-ab-head');
     ui.text = el('span');
+    ui.emergency = el('button', 'ttv-ab-icon ttv-ab-emergency', '🛟');
     ui.toggle = el('button', 'ttv-ab-icon');
     ui.lock = el('button', 'ttv-ab-icon');
-    ui.head.append(ui.text, ui.toggle, ui.lock);
+    ui.head.append(ui.text, ui.emergency, ui.toggle, ui.lock);
     ui.head.addEventListener('dblclick', (e) => {
       if (e.target.closest('button')) return;
       box.expanded = !box.expanded;
@@ -644,6 +664,15 @@
       saveBox();
       updateLock();
     });
+    ui.emergency.addEventListener('click', () => {
+      box.emergency = !box.emergency;
+      saveBox();
+      updateEmergency();
+      if (!box.emergency) emergencyOff();
+      showNotice(box.emergency
+        ? 'Notfall-Modus AN: durchgerutschte Werbung wird stumm & unscharf geschaltet'
+        : 'Notfall-Modus AUS', 3000);
+    });
     // Zeitstempel: nur in die Zwischenablage, nichts speichern
     async function doStamp() {
       const ok = await copyText(reportStamp());
@@ -687,6 +716,7 @@
     });
 
     updateLock();
+    updateEmergency();
     makeDraggable();
   }
 
@@ -763,13 +793,47 @@
   // hat der Player Werbung erkannt, die nicht entfernt wurde.
   const AD_UI_SELECTOR = '[data-a-target="video-ad-label"], [data-a-target="video-ad-countdown"]';
   let lastAutoReport = 0;
+
+  // Notfall-Modus: durchgerutschte Werbung stumm und unscharf schalten
+  const emergency = { active: false, videos: new Map() }; // video -> war vorher stumm?
+
+  function emergencyOn() {
+    for (const v of document.querySelectorAll('video')) {
+      if (!emergency.videos.has(v)) emergency.videos.set(v, v.muted);
+      if (!v.muted) v.muted = true; // Twitch könnte den Ton wieder anschalten – jede Runde prüfen
+      v.classList.add('ttv-ab-blur');
+      const host = v.parentElement;
+      if (host && !host.querySelector(':scope > .ttv-ab-veil')) {
+        if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
+        host.appendChild(el('div', 'ttv-ab-veil', '🛟 Werbung durchgerutscht – stumm & ausgeblendet'));
+      }
+    }
+    emergency.active = true;
+  }
+
+  function emergencyOff() {
+    for (const [v, wasMuted] of emergency.videos) {
+      v.classList.remove('ttv-ab-blur');
+      v.muted = wasMuted;
+    }
+    emergency.videos.clear();
+    for (const veil of document.querySelectorAll('.ttv-ab-veil')) veil.remove();
+    emergency.active = false;
+  }
+
   setInterval(() => {
-    if (!document.body || !document.querySelector(AD_UI_SELECTOR)) return;
-    if (Date.now() - lastAutoReport < 90 * 1000) return;
+    const adVisible = !!(document.body && document.querySelector(AD_UI_SELECTOR));
+
+    if (adVisible && box.emergency) emergencyOn();
+    else if (emergency.active) emergencyOff();
+
+    if (!adVisible || Date.now() - lastAutoReport < 90 * 1000) return;
     lastAutoReport = Date.now();
     addReport(true);
-    showNotice('Werbung ist durchgerutscht – automatisch gemeldet', 6000);
-  }, 2000);
+    showNotice(box.emergency
+      ? 'Werbung ist durchgerutscht – stumm & ausgeblendet, automatisch gemeldet'
+      : 'Werbung ist durchgerutscht – automatisch gemeldet', 6000);
+  }, 500);
 
   // ---------------------------------------------------------------------------
   // Hinweis direkt über der Box (oder darunter, wenn oben kein Platz ist)
