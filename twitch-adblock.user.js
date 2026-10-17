@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Adblock (Stream + Banner)
 // @namespace    local.twitch-adblock
-// @version      2.0.2
+// @version      2.0.3
 // @description  Bypasses pre-/mid-roll ads in the Twitch stream (playlist swap) and hides ad banners. Ad counter with time saved, emergency mode, DE/EN.
 // @description:de Umgeht Pre-/Mid-Roll-Werbung im Twitch-Stream (Playlist-Austausch) und blendet Werbebanner aus. Werbe-Zähler mit gesparter Zeit, Notfall-Modus, DE/EN.
 // @license      MIT
@@ -587,7 +587,7 @@
   // Zähler-Box mit Panel, Melde-Funktion, Statistik und Einstellungen
   // (alles im localStorage von twitch.tv gespeichert)
   // ---------------------------------------------------------------------------
-  const VERSION = '2.0.2';
+  const VERSION = '2.0.3';
   const REPO_URL = 'https://github.com/r79jv66tjh-byte/twitch-adblock';
   const RAW_URL = 'https://raw.githubusercontent.com/r79jv66tjh-byte/twitch-adblock/main/twitch-adblock.user.js';
   const ISSUE_URL = REPO_URL + '/issues/new?template=bug_report.yml';
@@ -606,8 +606,8 @@
 
   // Kurzinfo „Was ist neu“ zur aktuellen Version
   const WHATS_NEW = {
-    de: 'Ersatz-Stream funktioniert wieder mit Twitchs neuer Stream-Adresse, genauere „Zeit gespart“, bessere Diagnose',
-    en: 'replacement stream works again with Twitch\'s new stream address, more accurate "time saved", better diagnostics',
+    de: 'Ereignis-Protokoll lässt sich im Dev-Modus leeren (🧹 Ereignisse leeren)',
+    en: 'event log can be cleared in dev mode (🧹 Clear events)',
   };
 
   // Datum in Ortszeit (für „Heute“ und den Verlauf)
@@ -705,6 +705,8 @@
       manual: 'manuell',
       copyLog: '📋 Protokoll kopieren',
       clearLeaked: '🗑 Durchgerutscht leeren',
+      clearEvents: '🧹 Ereignisse leeren',
+      clearEventsTitle: 'Löscht alle Einträge des Ereignis-Protokolls (Zähler und Durchgerutscht-Liste bleiben)',
       resetAll: '↺ Zähler zurücksetzen',
       reportBug: '🐞 Fehler melden',
       reportBugTitle: 'Kopiert das Protokoll und öffnet das Fehler-Formular auf GitHub',
@@ -871,6 +873,8 @@
       manual: 'manual',
       copyLog: '📋 Copy log',
       clearLeaked: '🗑 Clear slipped through',
+      clearEvents: '🧹 Clear events',
+      clearEventsTitle: 'Deletes all entries of the event log (counters and slipped-through list are kept)',
       resetAll: '↺ Reset counters',
       reportBug: '🐞 Report a problem',
       reportBugTitle: 'Copies the log and opens the bug report form on GitHub',
@@ -1565,8 +1569,10 @@
     const devActions = el('div', 'ttv-ab-actions');
     ui.copy = el('button', '', t('copyLog'));
     ui.clear = el('button', '', t('clearLeaked'));
+    ui.clearEvents = el('button', '', t('clearEvents'));
+    ui.clearEvents.title = t('clearEventsTitle');
     ui.reset = el('button', '', t('resetAll'));
-    devActions.append(ui.copy, ui.clear, ui.reset);
+    devActions.append(ui.copy, ui.clearEvents, ui.clear, ui.reset);
     ui.devWrap.append(ui.listTitle, ui.list, ui.eventsTitle, ui.events, devActions);
 
     // Immer sichtbar: Fehler melden, Updates
@@ -1631,6 +1637,11 @@
       if (v === null) openUpdate(); // Prüfung blockiert? Dann direkt die Update-Seite öffnen
       else if (cmpVersion(v, VERSION) > 0) flashButton(ui.checkUpdate, t('updateAvail')(v).split(' – ')[0]);
       else flashButton(ui.checkUpdate, t('upToDate') + ' (' + VERSION + ')');
+    });
+    confirmClick(ui.clearEvents, () => {
+      saveJson(EVENTS_KEY, []);
+      renderCounter();
+      flashButton(ui.clearEvents, t('cleared'));
     });
     confirmClick(ui.clear, () => {
       saveJson(REPORTS_KEY, []);

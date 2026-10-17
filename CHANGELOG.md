@@ -3,6 +3,11 @@
 🇬🇧 English / 🇩🇪 Deutsch – each entry is listed in both languages.
 Format: [Keep a Changelog](https://keepachangelog.com/), versions: [SemVer](https://semver.org/).
 
+## [2.0.3] – 2026-10-17
+
+- EN: New button **🧹 Clear events** in dev mode – empties the event log (counters and slipped-through list are kept)
+- DE: Neuer Button **🧹 Ereignisse leeren** im Dev-Modus – leert das Ereignis-Protokoll (Zähler und Durchgerutscht-Liste bleiben)
+
 ## [2.0.2] – 2026-10-17
 
 - EN: Recognises Twitch's newer stream list address (`/api/v2/channel/hls/`) – the ad-free replacement stream and the "offline" diagnosis work again; playlists are matched more tolerantly

@@ -80,7 +80,8 @@ Für die Fehlersuche (Einstellungen → Anzeige → Dev-Modus). Zusätzlich sich
 - „Dieser Tab“, letzte Werbepause mit Methode, **letztes Problem** (gelb = Warnung, rot = Fehler)
 - **⏱ Zeitstempel** (kopiert Uhrzeit, Kanal, Methode – speichert nichts, **Alt + Z**) und **🔗 Sync** (koppelt Zeitstempel und Durchgerutscht)
 - **Durchgerutscht-Protokoll** und **Ereignisliste** (die letzten 15 Einträge)
-- **📋 Protokoll kopieren**, **🗑 Durchgerutscht leeren**, **↺ Zähler zurücksetzen** (Löschen fragt nach: 1. Klick „Sicher? Nochmal klicken“, 2. Klick innerhalb von 4 s)
+- **📋 Protokoll kopieren**
+- **🧹 Ereignisse leeren** (nur das Ereignis-Protokoll), **🗑 Durchgerutscht leeren** (Liste und Zähler „Durchgerutscht“), **↺ Zähler zurücksetzen** (alle Zähler und der Verlauf) – Löschen fragt jeweils nach: 1. Klick „Sicher? Nochmal klicken“, 2. Klick innerhalb von 4 s
 
 Das Protokoll schreibt **immer** im Hintergrund mit – auch bei ausgeschaltetem Dev-Modus.
 

@@ -80,7 +80,8 @@ For troubleshooting (Settings → Display → Dev mode). Additionally visible:
 - "This tab", last ad break with method, **last problem** (yellow = warning, red = error)
 - **⏱ Timestamp** (copies time, channel, method – saves nothing, **Alt + Z**) and **🔗 Sync** (links timestamp and slipped through)
 - **Slipped-through log** and **event list** (last 15 entries)
-- **📋 Copy log**, **🗑 Clear slipped through**, **↺ Reset counters** (deleting asks for confirmation: 1st click "Sure? Click again", 2nd click within 4 s)
+- **📋 Copy log**
+- **🧹 Clear events** (only the event log), **🗑 Clear slipped through** (list and "slipped through" counter), **↺ Reset counters** (all counters and history) – each asks for confirmation: 1st click "Sure? Click again", 2nd click within 4 s
 
 The log is **always** recorded in the background – even with dev mode off.
 
