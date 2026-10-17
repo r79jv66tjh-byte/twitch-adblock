@@ -2,6 +2,8 @@
 
 🇬🇧 **English** | [🇩🇪 Deutsch](README.de.md)
 
+*This project is AI-assisted (vibecoded).*
+
 Blocks or bypasses on twitch.tv:
 
 - **Ads in the stream** (pre-rolls and mid-rolls)
@@ -22,6 +24,8 @@ Twitch inserts ads **server-side directly into the video stream** ("stitched ads
 Legal notice: Blocking ads may violate Twitch's Terms of Service. Use at your own risk. If you want to support streamers, consider subscriptions or Twitch Turbo.
 
 ## Installation (Chrome, Edge, Firefox)
+
+**Easiest: the [install page](https://r79jv66tjh-byte.github.io/twitch-adblock/)** – detects your browser and guides you through the 3 steps with one button each.
 
 ### 1. Install a userscript manager
 
@@ -197,6 +201,7 @@ Up to 200 events are stored; older ones are removed automatically.
 | `CHANGELOG.md` | All changes per version |
 | `.github/ISSUE_TEMPLATE/` | Forms for bug reports and ideas |
 | `tests/worker.test.mjs` | Automatic tests (ads, replacement stream, offline, VOD, self-test) – locally: `node --test tests/worker.test.mjs` |
+| `docs/index.html` | Install page (GitHub Pages) |
 | `docs/screenshots/` | Images for this guide |
 | `.github/workflows/check.yml` | Automatic check on every push (syntax, tests, version numbers) |
 | `LICENSE` | MIT license |

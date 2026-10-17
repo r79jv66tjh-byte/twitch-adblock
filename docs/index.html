@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Twitch Adblock – Installation</title>
+<meta name="description" content="Twitch Adblock in 3 Schritten installieren – Tampermonkey, Userscripts zulassen, Script installieren.">
+<style>
+  :root {
+    --bg: #f4f1fa; --bg2: #e9e2f7; --card: rgba(255, 255, 255, 0.72); --line: rgba(80, 40, 150, 0.14);
+    --text: #1d1530; --muted: #5d5470; --acc: #7c3aed; --acc-l: #a78bfa; --good: #0f9d6b; --warn: #b45309;
+    --btn-text: #fff; --shadow: 0 10px 40px rgba(60, 30, 120, 0.12);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0e0b16; --bg2: #1b1330; --card: rgba(30, 24, 46, 0.7); --line: rgba(191, 148, 255, 0.16);
+      --text: #f1eafe; --muted: #a99fbd; --acc: #9146ff; --acc-l: #bf94ff; --good: #5fe0a5; --warn: #ffd37a;
+      --shadow: 0 10px 40px rgba(0, 0, 0, 0.45);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0e0b16; --bg2: #1b1330; --card: rgba(30, 24, 46, 0.7); --line: rgba(191, 148, 255, 0.16);
+    --text: #f1eafe; --muted: #a99fbd; --acc: #9146ff; --acc-l: #bf94ff; --good: #5fe0a5; --warn: #ffd37a;
+    --shadow: 0 10px 40px rgba(0, 0, 0, 0.45);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; color: var(--text); background: var(--bg);
+    background-image: radial-gradient(circle at 15% 10%, var(--bg2), transparent 45%), radial-gradient(circle at 90% 80%, var(--bg2), transparent 40%);
+    font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 760px; margin: 0 auto; padding: 32px 16px 56px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  h1 { font-size: clamp(26px, 6vw, 36px); line-height: 1.15; margin: 0; letter-spacing: -0.01em; }
+  h1 span { color: var(--acc); }
+  .lead { color: var(--muted); margin: 10px 0 24px; }
+  .lang { display: flex; gap: 4px; padding: 3px; border-radius: 999px; border: 1px solid var(--line); background: var(--card); }
+  .lang button { all: unset; cursor: pointer; padding: 4px 12px; border-radius: 999px; font-size: 14px; color: var(--muted); }
+  .lang button[aria-pressed="true"] { background: var(--acc); color: var(--btn-text); }
+  .browser {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 14px; margin-bottom: 18px;
+    border-radius: 14px; border: 1px solid var(--line); background: var(--card); font-size: 15px;
+  }
+  .browser select { font: inherit; color: var(--text); background: transparent; border: 1px solid var(--line); border-radius: 8px; padding: 3px 8px; }
+  .browser select option { color: #000; }
+  .step {
+    position: relative; display: grid; grid-template-columns: 44px 1fr; gap: 14px; padding: 18px;
+    margin-bottom: 14px; border-radius: 18px; border: 1px solid var(--line); background: var(--card);
+    -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); box-shadow: var(--shadow);
+    transition: opacity .2s;
+  }
+  .step.done { opacity: .6; }
+  .step.hidden { display: none; }
+  .num {
+    width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; font-weight: 700;
+    color: var(--btn-text); background: linear-gradient(135deg, var(--acc-l), var(--acc));
+  }
+  .step.done .num { background: var(--good); }
+  .step h2 { font-size: 19px; margin: 8px 0 4px; }
+  .step p { margin: 4px 0 10px; color: var(--muted); }
+  .step ol { margin: 6px 0 10px; padding-left: 20px; color: var(--muted); }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px; padding: 10px 16px; border-radius: 12px; border: 0; cursor: pointer;
+    font: 600 15px/1.2 inherit; color: var(--btn-text); text-decoration: none;
+    background: linear-gradient(135deg, var(--acc-l), var(--acc)); box-shadow: 0 4px 14px rgba(124, 58, 237, 0.3);
+  }
+  .btn:hover { filter: brightness(1.08); }
+  .btn.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); box-shadow: none; }
+  .check { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--muted); cursor: pointer; margin-left: 4px; }
+  .check input { accent-color: var(--good); width: 16px; height: 16px; }
+  code { font: 14px ui-monospace, Consolas, monospace; padding: 2px 6px; border-radius: 6px; background: var(--line); color: var(--text); }
+  .note { font-size: 14px; color: var(--warn); }
+  .done-card { text-align: center; padding: 24px 18px; }
+  .done-card img { max-width: 100%; width: 386px; border-radius: 14px; margin-top: 12px; }
+  footer { margin-top: 28px; font-size: 14px; color: var(--muted); text-align: center; }
+  footer a { color: var(--acc); }
+  .toast {
+    position: fixed; left: 50%; bottom: 20px; transform: translate(-50%, 20px); opacity: 0; transition: .2s;
+    padding: 10px 16px; border-radius: 12px; background: var(--acc); color: var(--btn-text); font-size: 14px; pointer-events: none;
+  }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>🛡 Twitch <span>Adblock</span></h1>
+    <div class="lang" role="group" aria-label="Sprache / Language">
+      <button type="button" data-lang="de">Deutsch</button>
+      <button type="button" data-lang="en">English</button>
+    </div>
+  </header>
+  <p class="lead" data-t="lead"></p>
+
+  <div class="browser">
+    <span data-t="detected"></span>
+    <select id="browser" aria-label="Browser">
+      <option value="chrome">Chrome</option>
+      <option value="edge">Microsoft Edge</option>
+      <option value="firefox">Firefox</option>
+      <option value="brave">Brave / Opera / Vivaldi</option>
+      <option value="safari">Safari</option>
+    </select>
+  </div>
+
+  <section class="step" id="s1">
+    <div class="num">1</div>
+    <div>
+      <h2 data-t="s1title"></h2>
+      <p data-t="s1text"></p>
+      <p class="note" id="safariNote" data-t="safari" hidden></p>
+      <div class="actions">
+        <a class="btn" id="tmLink" target="_blank" rel="noopener" data-t="s1btn"></a>
+        <label class="check"><input type="checkbox" data-step="s1"> <span data-t="doneLabel"></span></label>
+      </div>
+    </div>
+  </section>
+
+  <section class="step" id="s2">
+    <div class="num">2</div>
+    <div>
+      <h2 data-t="s2title"></h2>
+      <p data-t="s2text"></p>
+      <ol>
+        <li data-t="s2a"></li>
+        <li data-t="s2b"></li>
+        <li data-t="s2c"></li>
+      </ol>
+      <div class="actions">
+        <button class="btn" type="button" id="copyExt"></button>
+        <label class="check"><input type="checkbox" data-step="s2"> <span data-t="doneLabel"></span></label>
+      </div>
+    </div>
+  </section>
+
+  <section class="step" id="s3">
+    <div class="num" id="n3">3</div>
+    <div>
+      <h2 data-t="s3title"></h2>
+      <p data-t="s3text"></p>
+      <div class="actions">
+        <a class="btn" href="https://raw.githubusercontent.com/r79jv66tjh-byte/twitch-adblock/main/twitch-adblock.user.js" data-t="s3btn"></a>
+        <label class="check"><input type="checkbox" data-step="s3"> <span data-t="doneLabel"></span></label>
+      </div>
+    </div>
+  </section>
+
+  <section class="step done-card">
+    <div>
+      <h2 data-t="s4title"></h2>
+      <p data-t="s4text"></p>
+      <div class="actions" style="justify-content:center">
+        <a class="btn" href="https://www.twitch.tv/" target="_blank" rel="noopener" data-t="s4btn"></a>
+        <a class="btn ghost" id="guideLink" target="_blank" rel="noopener" data-t="guide"></a>
+      </div>
+      <img id="shot" alt="">
+    </div>
+  </section>
+
+  <footer>
+    <span data-t="footer"></span> ·
+    <a href="https://github.com/r79jv66tjh-byte/twitch-adblock" target="_blank" rel="noopener">GitHub</a> ·
+    <span data-t="ai"></span>
+  </footer>
+</main>
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+(function () {
+  'use strict';
+  var STORES = {
+    chrome: 'https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo',
+    brave: 'https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo',
+    edge: 'https://microsoftedge.microsoft.com/addons/detail/tampermonkey/iikmkjjpkbbbdmpkfmabfldbbeknhbnd',
+    firefox: 'https://addons.mozilla.org/firefox/addon/tampermonkey/',
+    safari: 'https://www.tampermonkey.net/?browser=safari'
+  };
+  var EXT_PAGE = { chrome: 'chrome://extensions', brave: 'chrome://extensions', edge: 'edge://extensions' };
+  var REPO = 'https://github.com/r79jv66tjh-byte/twitch-adblock/blob/main/';
+
+  var T = {
+    de: {
+      lead: 'In drei Schritten installiert. Jeder Schritt öffnet die richtige Seite – du klickst nur noch auf „Hinzufügen“ bzw. „Installieren“.',
+      detected: 'Dein Browser:',
+      s1title: 'Tampermonkey hinzufügen',
+      s1text: 'Tampermonkey ist die Erweiterung, die das Script ausführt. Öffne den Store und klicke auf „Hinzufügen“.',
+      s1btn: 'Tampermonkey im Store öffnen ↗',
+      safari: 'Hinweis: In Safari ist Tampermonkey kostenpflichtig. Kostenlos geht es mit Chrome, Edge oder Firefox.',
+      s2title: 'Userscripts zulassen',
+      s2text: 'Chrome und Edge verlangen seit Kurzem einen Schalter. Links auf diese Seite darf eine Webseite nicht öffnen – deshalb kopierst du die Adresse:',
+      s2a: 'Adresse kopieren (Button unten) und in einen neuen Tab einfügen, Enter.',
+      s2b: 'Bei Tampermonkey auf „Details“ klicken.',
+      s2c: '„Userscripts zulassen“ einschalten. Gibt es den Schalter nicht: oben rechts den „Entwicklermodus“ einschalten.',
+      copyBtn: function (a) { return '📋 ' + a + ' kopieren'; },
+      copied: 'Kopiert – in einen neuen Tab einfügen',
+      s3title: 'Script installieren',
+      s3text: 'Tampermonkey öffnet eine Installationsseite. Dort auf „Installieren“ klicken. Updates kommen danach automatisch.',
+      s3btn: 'Twitch Adblock installieren',
+      s4title: '🎉 Fertig!',
+      s4text: 'Twitch öffnen, mit Strg + F5 neu laden und einen Kanal starten. Unten links erscheint 🛡.',
+      s4btn: 'Twitch öffnen ↗',
+      guide: 'Quickguide',
+      doneLabel: 'erledigt',
+      footer: 'Kostenlos, Open Source (MIT), alle Daten bleiben in deinem Browser',
+      ai: 'KI-gestützt entwickelt (vibecoded)',
+      shotAlt: 'Die Box von Twitch Adblock',
+      guideFile: 'QUICKSTART.de.md',
+      shotFile: 'screenshots/panel-de.png',
+      title: 'Twitch Adblock – Installation'
+    },
+    en: {
+      lead: 'Installed in three steps. Each step opens the right page – you just click “Add” or “Install”.',
+      detected: 'Your browser:',
+      s1title: 'Add Tampermonkey',
+      s1text: 'Tampermonkey is the extension that runs the script. Open the store and click “Add”.',
+      s1btn: 'Open Tampermonkey in the store ↗',
+      safari: 'Note: Tampermonkey costs money in Safari. It’s free with Chrome, Edge or Firefox.',
+      s2title: 'Allow user scripts',
+      s2text: 'Chrome and Edge now require a switch. Web pages aren’t allowed to link to this page – so you copy the address:',
+      s2a: 'Copy the address (button below), paste it into a new tab, press Enter.',
+      s2b: 'Click “Details” on Tampermonkey.',
+      s2c: 'Turn on “Allow User Scripts”. If there is no such switch: turn on “Developer mode” in the top right.',
+      copyBtn: function (a) { return '📋 Copy ' + a; },
+      copied: 'Copied – paste it into a new tab',
+      s3title: 'Install the script',
+      s3text: 'Tampermonkey opens an install page. Click “Install” there. Updates then arrive automatically.',
+      s3btn: 'Install Twitch Adblock',
+      s4title: '🎉 Done!',
+      s4text: 'Open Twitch, reload with Ctrl + F5 and start a channel. 🛡 appears in the bottom left.',
+      s4btn: 'Open Twitch ↗',
+      guide: 'Quick guide',
+      doneLabel: 'done',
+      footer: 'Free, open source (MIT), all data stays in your browser',
+      ai: 'AI-assisted (vibecoded)',
+      shotAlt: 'The Twitch Adblock box',
+      guideFile: 'QUICKSTART.md',
+      shotFile: 'screenshots/panel-en.png',
+      title: 'Twitch Adblock – Install'
+    }
+  };
+
+  function store(key, val) {
+    try {
+      if (val === undefined) return localStorage.getItem(key);
+      localStorage.setItem(key, val);
+    } catch (e) { return null; }
+    return null;
+  }
+
+  function detectBrowser() {
+    var ua = navigator.userAgent;
+    if (/Edg\//.test(ua)) return 'edge';
+    if (/Firefox\//.test(ua)) return 'firefox';
+    if (/OPR\/|Vivaldi/.test(ua) || (navigator.brave && navigator.brave.isBrave)) return 'brave';
+    if (/Chrome\//.test(ua)) return 'chrome';
+    if (/Safari\//.test(ua)) return 'safari';
+    return 'chrome';
+  }
+
+  var lang = store('ttvInstallLang') || ((navigator.language || 'de').toLowerCase().indexOf('de') === 0 ? 'de' : 'en');
+  var browserSel = document.getElementById('browser');
+  browserSel.value = detectBrowser();
+
+  function render() {
+    var t = T[lang];
+    var b = browserSel.value;
+    document.documentElement.lang = lang;
+    document.title = t.title;
+    document.querySelectorAll('[data-t]').forEach(function (el) {
+      var v = t[el.getAttribute('data-t')];
+      if (typeof v === 'string') el.textContent = v;
+    });
+    document.querySelectorAll('.lang button').forEach(function (btn) {
+      btn.setAttribute('aria-pressed', String(btn.getAttribute('data-lang') === lang));
+    });
+    document.getElementById('tmLink').href = STORES[b];
+    document.getElementById('safariNote').hidden = b !== 'safari';
+    // Schritt 2 gibt es nur bei Chromium-Browsern
+    var needsSwitch = !!EXT_PAGE[b];
+    document.getElementById('s2').classList.toggle('hidden', !needsSwitch);
+    document.getElementById('n3').textContent = needsSwitch ? '3' : '2';
+    if (needsSwitch) document.getElementById('copyExt').textContent = t.copyBtn(EXT_PAGE[b]);
+    document.getElementById('guideLink').href = REPO + t.guideFile;
+    var shot = document.getElementById('shot');
+    shot.src = t.shotFile;
+    shot.alt = t.shotAlt;
+  }
+
+  // Erledigt-Häkchen (nur in diesem Browser gemerkt)
+  document.querySelectorAll('input[data-step]').forEach(function (cb) {
+    var id = cb.getAttribute('data-step');
+    cb.checked = store('ttvInstall_' + id) === '1';
+    document.getElementById(id).classList.toggle('done', cb.checked);
+    cb.addEventListener('change', function () {
+      store('ttvInstall_' + id, cb.checked ? '1' : '0');
+      document.getElementById(id).classList.toggle('done', cb.checked);
+    });
+  });
+  // Klick auf einen Schritt-Button hakt ihn ab
+  function autoCheck(btnId, step) {
+    document.getElementById(btnId).addEventListener('click', function () {
+      var cb = document.querySelector('input[data-step="' + step + '"]');
+      if (!cb.checked) { cb.checked = true; cb.dispatchEvent(new Event('change')); }
+    });
+  }
+  autoCheck('tmLink', 's1');
+  document.querySelector('#s3 .btn').id = 'scriptLink';
+  autoCheck('scriptLink', 's3');
+
+  var toastTimer = null;
+  function toast(text) {
+    var el = document.getElementById('toast');
+    el.textContent = text;
+    el.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.classList.remove('show'); }, 2500);
+  }
+
+  document.getElementById('copyExt').addEventListener('click', function () {
+    var addr = EXT_PAGE[browserSel.value];
+    var done = function () { toast(T[lang].copied); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(addr).then(done, function () { window.prompt('', addr); });
+    } else {
+      window.prompt('', addr);
+    }
+  });
+
+  document.querySelectorAll('.lang button').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      lang = btn.getAttribute('data-lang');
+      store('ttvInstallLang', lang);
+      render();
+    });
+  });
+  browserSel.addEventListener('change', render);
+  render();
+})();
+</script>
+</body>
+</html>

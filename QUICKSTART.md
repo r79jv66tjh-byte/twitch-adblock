@@ -4,6 +4,8 @@
 
 ## Installed in 3 steps
 
+Guided with buttons: **[install page](https://r79jv66tjh-byte.github.io/twitch-adblock/)** – or by hand:
+
 1. Install **Tampermonkey** (or Violentmonkey) from your browser's store.
    Chrome/Edge: right-click the Tampermonkey icon → *Manage extension* → turn on **"Allow User Scripts"**.
 2. **[Install the script](https://raw.githubusercontent.com/r79jv66tjh-byte/twitch-adblock/main/twitch-adblock.user.js)** → *Install*.

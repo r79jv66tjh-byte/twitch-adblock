@@ -2,6 +2,8 @@
 
 [🇬🇧 English](README.md) | 🇩🇪 **Deutsch**
 
+*Dieses Projekt ist KI-gestützt entwickelt (vibecoded).*
+
 Blockiert bzw. umgeht auf twitch.tv:
 
 - **Werbung im Stream** (Pre-Rolls und Mid-Rolls)
@@ -22,6 +24,8 @@ Twitch schneidet die Werbung **serverseitig direkt in den Videostream** ein („
 Rechtlicher Hinweis: Das Blockieren von Werbung kann gegen die Nutzungsbedingungen von Twitch verstoßen. Die Nutzung erfolgt auf eigene Verantwortung. Wer Streamer unterstützen möchte, kann das über Abos oder Twitch Turbo tun.
 
 ## Installation (Chrome, Edge, Firefox)
+
+**Am einfachsten: die [Installations-Seite](https://r79jv66tjh-byte.github.io/twitch-adblock/)** – erkennt deinen Browser und führt dich mit je einem Button durch die 3 Schritte.
 
 ### 1. Userscript-Manager installieren
 
@@ -197,6 +201,7 @@ Gespeichert werden bis zu 200 Ereignisse, ältere fallen automatisch weg.
 | `CHANGELOG.md` | Alle Änderungen pro Version |
 | `.github/ISSUE_TEMPLATE/` | Formulare für Fehlermeldungen und Ideen |
 | `tests/worker.test.mjs` | Automatische Tests (Werbung, Ersatz-Stream, Offline, VOD, Selbsttest) – lokal: `node --test tests/worker.test.mjs` |
+| `docs/index.html` | Installations-Seite (GitHub Pages) |
 | `docs/screenshots/` | Bilder für diese Anleitung |
 | `.github/workflows/check.yml` | Automatische Prüfung bei jedem Push (Syntax, Tests, Versionsnummern) |
 | `LICENSE` | MIT-Lizenz |
