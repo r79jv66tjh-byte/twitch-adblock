@@ -3,6 +3,11 @@
 🇬🇧 English / 🇩🇪 Deutsch – each entry is listed in both languages.
 Format: [Keep a Changelog](https://keepachangelog.com/), versions: [SemVer](https://semver.org/).
 
+## [2.0.4] – 2026-10-17
+
+- EN: All headings in the panel can be expanded/collapsed (settings groups Display, Blocker, Extras, Backup & restore; history; channels; slipped-through log; events) – the state is saved. Settings groups start collapsed.
+- DE: Alle Überschriften im Panel lassen sich auf-/zuklappen (Einstellungsgruppen Anzeige, Blocker, Extras, Sichern & Wiederherstellen; Verlauf; Kanäle; Durchgerutscht-Protokoll; Ereignisse) – der Zustand wird gespeichert. Einstellungsgruppen starten zugeklappt.
+
 ## [2.0.3] – 2026-10-17
 
 - EN: New button **🧹 Clear events** in dev mode – empties the event log (counters and slipped-through list are kept)

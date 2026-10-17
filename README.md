@@ -72,6 +72,7 @@ In the bottom left the box shows e.g. **"🛡 42 ad breaks · 1 h 13 min saved"*
 - **🐞 Report a problem** and **🔄 Check for updates**
 - **⚙ Settings**
 - Footer: **version** and a "What's new?" link
+- All **headings** (e.g. Display, Blocker, Extras, History, Events) can be **expanded and collapsed** with a click (▾ / ▴); the state is saved. Settings groups start collapsed.
 
 ### 🛠 Dev mode
 

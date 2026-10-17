@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Adblock (Stream + Banner)
 // @namespace    local.twitch-adblock
-// @version      2.0.3
+// @version      2.0.4
 // @description  Bypasses pre-/mid-roll ads in the Twitch stream (playlist swap) and hides ad banners. Ad counter with time saved, emergency mode, DE/EN.
 // @description:de Umgeht Pre-/Mid-Roll-Werbung im Twitch-Stream (Playlist-Austausch) und blendet Werbebanner aus. Werbe-Zähler mit gesparter Zeit, Notfall-Modus, DE/EN.
 // @license      MIT
@@ -483,6 +483,15 @@
       font-size: 11px; font-weight: 600; color: #adadb8; background: rgba(255, 255, 255, 0.05);
     }
     #ttv-adblock-counter .ttv-ab-wide:hover { background: rgba(255, 255, 255, 0.12); color: #efeff1; }
+    #ttv-adblock-counter .ttv-ab-foldhead {
+      display: flex; justify-content: space-between; align-items: center; width: 100%; box-sizing: border-box;
+      margin: 8px 0 2px; padding: 3px 2px; font-size: 11px; font-weight: 600; color: #adadb8;
+      text-transform: uppercase; border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+    #ttv-adblock-counter .ttv-ab-foldhead:hover, #ttv-adblock-counter .ttv-ab-foldhead.open { color: #efeff1; }
+    #ttv-adblock-counter .ttv-ab-arrow { font-size: 10px; margin-left: 8px; }
+    #ttv-adblock-counter .ttv-ab-foldbody { padding-top: 2px; }
+    #ttv-adblock-counter .ttv-ab-foldbody[hidden] { display: none !important; }
     #ttv-adblock-counter .ttv-ab-fold { display: none; padding: 4px 2px 0; }
     #ttv-adblock-counter .ttv-ab-fold.open { display: block; }
     #ttv-adblock-counter .ttv-ab-chart { display: flex; gap: 4px; align-items: flex-end; height: 74px; margin: 4px 0 6px; }
@@ -587,7 +596,7 @@
   // Zähler-Box mit Panel, Melde-Funktion, Statistik und Einstellungen
   // (alles im localStorage von twitch.tv gespeichert)
   // ---------------------------------------------------------------------------
-  const VERSION = '2.0.3';
+  const VERSION = '2.0.4';
   const REPO_URL = 'https://github.com/r79jv66tjh-byte/twitch-adblock';
   const RAW_URL = 'https://raw.githubusercontent.com/r79jv66tjh-byte/twitch-adblock/main/twitch-adblock.user.js';
   const ISSUE_URL = REPO_URL + '/issues/new?template=bug_report.yml';
@@ -606,8 +615,8 @@
 
   // Kurzinfo „Was ist neu“ zur aktuellen Version
   const WHATS_NEW = {
-    de: 'Ereignis-Protokoll lässt sich im Dev-Modus leeren (🧹 Ereignisse leeren)',
-    en: 'event log can be cleared in dev mode (🧹 Clear events)',
+    de: 'Alle Überschriften im Panel (Anzeige, Blocker, Extras, Verlauf, Ereignisse …) lassen sich auf- und zuklappen',
+    en: 'all headings in the panel (display, blocker, extras, history, events …) can be expanded and collapsed',
   };
 
   // Datum in Ortszeit (für „Heute“ und den Verlauf)
@@ -753,6 +762,7 @@
       groupView: 'Anzeige',
       groupBlock: 'Blocker',
       groupExtra: 'Extras',
+      groupBackup: 'Sichern & Wiederherstellen',
       setNotice: 'Hinweise einblenden',
       setCounter: 'Zahlen in der Box anzeigen',
       setCounterHint: 'Aus = nur das 🛡-Symbol',
@@ -921,6 +931,7 @@
       groupView: 'Display',
       groupBlock: 'Blocker',
       groupExtra: 'Extras',
+      groupBackup: 'Backup & restore',
       setNotice: 'Show notices',
       setCounter: 'Show numbers in the box',
       setCounterHint: 'Off = only the 🛡 icon',
@@ -1389,11 +1400,40 @@
     renderCounter();
   }
 
+  // Klappbare Überschrift: Klick klappt den Abschnitt auf/zu, Zustand wird gespeichert
+  function foldSection(key, title, defaultOpen) {
+    const head = el('button', 'ttv-ab-foldhead');
+    const label = el('span', '', title);
+    const arrow = el('span', 'ttv-ab-arrow');
+    head.append(label, arrow);
+    const body = el('div', 'ttv-ab-foldbody');
+    const isOpen = () => (box.folds && key in box.folds ? !!box.folds[key] : defaultOpen);
+    const apply = () => {
+      const open = isOpen();
+      body.hidden = !open;
+      arrow.textContent = open ? '▴' : '▾';
+      head.classList.toggle('open', open);
+    };
+    head.addEventListener('click', () => {
+      box.folds = Object.assign({}, box.folds, { [key]: !isOpen() });
+      saveBox();
+      apply();
+      renderCounter();
+    });
+    apply();
+    return { head, body, label };
+  }
+
   function buildSettings() {
     ui.settingsBtn = el('button', 'ttv-ab-wide');
     ui.settingsWrap = el('div', 'ttv-ab-fold');
     ui.inputs = {};
-    const group = (title) => ui.settingsWrap.append(el('h4', '', title));
+    let current = ui.settingsWrap;
+    const group = (key, title) => {
+      const f = foldSection(key, title, false);
+      ui.settingsWrap.append(f.head, f.body);
+      current = f.body;
+    };
     const check = (key, label, hint) => {
       const row = el('label', 'ttv-ab-setting');
       const input = el('input');
@@ -1403,11 +1443,11 @@
       const txt = el('span', '', label);
       if (hint) txt.append(el('small', '', hint));
       row.append(input, txt);
-      ui.settingsWrap.append(row);
+      current.append(row);
       ui.inputs[key] = input;
     };
 
-    group(t('groupView'));
+    group('setView', t('groupView'));
     check('showNotice', t('setNotice'));
     check('showCounter', t('setCounter'), t('setCounterHint'));
     check('devMode', t('setDev'), t('setDevHint'));
@@ -1425,15 +1465,15 @@
       rebuildCounter();
     });
     langRow.append(el('span', '', t('setLang')), select);
-    ui.settingsWrap.append(langRow);
+    current.append(langRow);
 
-    group(t('groupBlock'));
+    group('setBlock', t('groupBlock'));
     check('emergency', t('setEmergency'));
     check('autoDetect', t('setAuto'));
     check('autoRecover', t('setRecover'), t('setRecoverHint'));
     check('vod', t('setVod'), t('setVodHint'));
 
-    group(t('groupExtra'));
+    group('setExtra', t('groupExtra'));
     check('shortcuts', t('setShortcuts'), t('setShortcutsHint'));
     check('updateCheck', t('setUpdate'));
     check('hideTurbo', t('setHideTurbo'));
@@ -1441,6 +1481,7 @@
     check('stopFrontpage', t('setStopFront'));
 
     // Sichern / Wiederherstellen
+    group('setBackup', t('groupBackup'));
     const backup = el('div', 'ttv-ab-actions');
     const exportBtn = el('button', '', t('exportBtn'));
     exportBtn.title = t('exportTitle');
@@ -1454,7 +1495,7 @@
     file.addEventListener('change', () => { if (file.files[0]) importData(file.files[0], ui.importBtn); file.value = ''; });
     ui.importBtn.addEventListener('click', () => file.click());
     backup.append(exportBtn, ui.importBtn, file);
-    ui.settingsWrap.append(backup);
+    current.append(backup);
 
     ui.settingsBtn.addEventListener('click', () => {
       box.settingsOpen = !box.settingsOpen;
@@ -1466,12 +1507,13 @@
   function buildStats() {
     ui.statsBtn = el('button', 'ttv-ab-wide');
     ui.statsWrap = el('div', 'ttv-ab-fold');
-    ui.statsWrap.append(el('h4', '', t('last7')));
+    const days = foldSection('last7', t('last7'), true);
     ui.chart = el('div', 'ttv-ab-chart');
-    ui.statsWrap.append(ui.chart);
-    ui.statsWrap.append(el('h4', '', t('topChannels')));
+    days.body.append(ui.chart);
+    const chans = foldSection('channels', t('topChannels'), true);
     ui.channels = el('ul');
-    ui.statsWrap.append(ui.channels);
+    chans.body.append(ui.channels);
+    ui.statsWrap.append(days.head, days.body, chans.head, chans.body);
     ui.statsBtn.addEventListener('click', () => {
       box.statsOpen = !box.statsOpen;
       saveBox();
@@ -1562,10 +1604,13 @@
 
     // Dev-Bereich: Durchgerutscht-Liste, Ereignisse, Werkzeuge
     ui.devWrap = el('div', 'ttv-ab-dev');
-    ui.listTitle = el('h4');
+    const leaks = foldSection('leaks', '', true);
+    ui.listTitle = leaks.label; // Text mit Anzahl wird beim Rendern gesetzt
     ui.list = el('ul');
-    ui.eventsTitle = el('h4', '', t('eventsTitle'));
+    leaks.body.append(ui.list);
+    const events = foldSection('events', t('eventsTitle'), true);
     ui.events = el('ul', 'ttv-ab-events');
+    events.body.append(ui.events);
     const devActions = el('div', 'ttv-ab-actions');
     ui.copy = el('button', '', t('copyLog'));
     ui.clear = el('button', '', t('clearLeaked'));
@@ -1573,7 +1618,7 @@
     ui.clearEvents.title = t('clearEventsTitle');
     ui.reset = el('button', '', t('resetAll'));
     devActions.append(ui.copy, ui.clearEvents, ui.clear, ui.reset);
-    ui.devWrap.append(ui.listTitle, ui.list, ui.eventsTitle, ui.events, devActions);
+    ui.devWrap.append(leaks.head, leaks.body, events.head, events.body, devActions);
 
     // Immer sichtbar: Fehler melden, Updates
     const mainActions = el('div', 'ttv-ab-actions');

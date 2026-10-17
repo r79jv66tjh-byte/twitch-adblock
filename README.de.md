@@ -72,6 +72,7 @@ Unten links zeigt die Box z. B. **„🛡 42 Werbepausen · 1 h 13 min gespart�
 - **🐞 Fehler melden** und **🔄 Nach Updates suchen**
 - **⚙ Einstellungen**
 - Fußzeile: **Version** und Link „Was ist neu?“
+- Alle **Überschriften** (z. B. Anzeige, Blocker, Extras, Verlauf, Ereignisse) lassen sich per Klick **auf- und zuklappen** (▾ / ▴); der Zustand wird gespeichert. Die Einstellungsgruppen starten zugeklappt.
 
 ### 🛠 Dev-Modus
 
