@@ -58,40 +58,56 @@ Ziehe die Datei `twitch-adblock.user.js` in ein Browserfenster. Tampermonkey/Vio
 3. Wenn Werbung kommt, erscheint darüber ein lila Hinweis:
    - „Werbung erkannt – werbefreier Ersatz-Stream aktiv“ oder
    - „Werbung wird herausgeschnitten – Bild kann kurz stehen bleiben“
+4. Nach der Werbepause siehst du kurz, wie viel Zeit du gespart hast, z. B. „Werbepause vorbei – 45 s gespart“.
+
+## Sprache
+
+Das Script spricht **Deutsch und Englisch**. Standardmäßig richtet es sich nach der Sprache deines Browsers (deutscher Browser → Deutsch, sonst Englisch). Umstellen kannst du das im Panel unter **⚙ Einstellungen → Sprache**.
 
 ## Werbe-Zähler
 
-- Unten links zeigt das Script an, wie viele **Werbepausen** insgesamt abgefangen wurden (eine Werbepause kann aus mehreren Spots bestehen, gezählt wird die Pause).
+- Unten links zeigt das Script an, wie viele **Werbepausen** blockiert wurden und wie viel **Zeit** du dadurch gespart hast, z. B. **„🛡 42 Werbepausen · 1 h 13 min gespart“**. Eine Werbepause kann aus mehreren Spots bestehen, gezählt wird die Pause.
+- **Zeit gespart:** Twitch schreibt die Länge jedes Werbespots in den Stream. Das Script zählt diese pro Werbepause zusammen (fehlt eine Angabe, misst es, wie lange die Pause gedauert hat).
 - **Verschieben:** Box an der oberen Zeile mit der Maus an die gewünschte Stelle ziehen. Die Position wird gespeichert und bleibt nach dem Neuladen erhalten.
 - **Sperren:** Auf das Schloss klicken. 🔓 = verschiebbar, 🔒 = gesperrt (kann nicht mehr versehentlich verschoben werden). Nochmal klicken entsperrt sie wieder.
-- **🛟 Notfall-Modus:** Der Rettungsring-Button schaltet ihn ein (grün) und aus (grau). Ist er an und rutscht trotzdem Werbung durch (Twitch zeigt sein „Werbung“-Label oder den Countdown), wird der Stream **stummgeschaltet und stark unscharf** gemacht, bis die Werbung vorbei ist. Danach ist alles automatisch wieder wie vorher, auch die Lautstärke. Standardmäßig an, die Einstellung wird gespeichert. Hinweis: Solange der Notfall-Modus greift, wird der Ton immer wieder stummgeschaltet. Wer den Ton während der Werbung hören will, schaltet den Modus kurz aus.
+- **🛟 Notfall-Modus:** Der Rettungsring-Button schaltet ihn ein (grün) und aus (grau). Ist er an und rutscht trotzdem Werbung durch (Twitch zeigt sein „Werbung“-Label oder den Countdown), wird der Stream **stummgeschaltet und stark unscharf** gemacht, bis die Werbung vorbei ist. Danach ist alles automatisch wieder wie vorher, auch die Lautstärke. Standardmäßig an. Hinweis: Solange der Notfall-Modus greift, wird der Ton immer wieder stummgeschaltet. Wer den Ton während der Werbung hören will, schaltet den Modus kurz aus.
 - **Aufklappen:** Auf ▾ klicken (oder Doppelklick auf die Zeile). ▴ klappt wieder ein. Der Zustand wird gespeichert.
-- Der lila Werbe-Hinweis erscheint immer direkt über der Box (oder darunter, wenn sie ganz oben sitzt).
+- Der lila Hinweis erscheint immer direkt über der Box (oder darunter, wenn sie ganz oben sitzt).
 - Gespeichert wird im Browser-Speicher von twitch.tv und überlebt Neuladen und Browser-Neustart. Wer die Website-Daten von Twitch löscht, setzt alles zurück.
-- Ausblenden: im Script oben `showCounter: true` auf `false` setzen.
 
 ### Aufgeklapptes Panel
 
-- **Statistik:** Dieser Tab / Heute / Insgesamt blockiert, dazu **Durchgerutscht** (rot).
+- **Statistik:** Dieser Tab / Heute / Insgesamt blockiert, **Zeit gespart heute / insgesamt** (grün) und **Durchgerutscht** (rot).
 - **Letzte Werbepause:** Uhrzeit, Kanal und Methode (Ersatz-Stream oder herausgeschnitten).
 - **Melde-Zeile** mit drei Buttons nebeneinander:
   - **⏱ Zeitstempel:** Kopiert einen Zeitstempel in die Zwischenablage, **ohne etwas zu speichern**. Einfügen mit Strg + V, z. B.:
-    `Werbung nicht blockiert – 17.10.2026 16:23:05 – Kanal: xyz – letzte Methode: Ersatz-Stream (vor 40 s) – Script 1.7.0`
+    `Werbung nicht blockiert – 17.10.2026 16:23:05 – Kanal: xyz – letzte Methode: Ersatz-Stream (vor 40 s) – Script 1.8.0`
   - **⚠ Durchgerutscht:** Speichert die gerade gesehene Werbung im Durchgerutscht-Protokoll und zählt „Durchgerutscht“ um 1 hoch.
-  - **🔗 Sync:** Koppelt die beiden Buttons. Ist Sync an (grün), löst ein Klick auf *einen* der beiden Buttons **beide** aus: Zeitstempel kopieren **und** als durchgerutscht speichern. Grau = aus, die Buttons arbeiten einzeln. Die Einstellung wird gespeichert.
+  - **🔗 Sync:** Koppelt die beiden Buttons. Ist Sync an (grün), löst ein Klick auf *einen* der beiden Buttons **beide** aus. Grau = aus, die Buttons arbeiten einzeln. Die Einstellung wird gespeichert.
 - **Automatische Erkennung:** Zeigt Twitch im Player seine eigene Werbe-Anzeige (Label „Werbung“ oder Countdown), wird das im Durchgerutscht-Protokoll gespeichert und kurz „Werbung ist durchgerutscht“ eingeblendet. Das ist ein Anhaltspunkt, keine sichere Erkennung: Nicht jede durchgerutschte Werbung wird so erkannt.
 - **Durchgerutscht – Protokoll:** Liste aller Fälle (manuell oder automatisch), bis zu 100 werden gespeichert.
-- **📋 Protokoll kopieren:** Kopiert das Durchgerutscht-Protokoll als Text in die Zwischenablage.
-- **🗑 Durchgerutscht leeren:** Löscht das Protokoll und setzt den Zähler „Durchgerutscht“ auf 0. Die Zahl der blockierten Werbepausen bleibt erhalten.
-- **↺ Zähler zurücksetzen:** Setzt alle Zähler auf 0.
+- **📋 Protokoll kopieren:** Kopiert das Protokoll als Text in die Zwischenablage.
+- **🗑 Durchgerutscht leeren:** Löscht das Protokoll und setzt „Durchgerutscht“ auf 0. Blockierte Werbepausen und gesparte Zeit bleiben erhalten.
+- **↺ Zähler zurücksetzen:** Setzt alle Zähler (auch die gesparte Zeit) auf 0.
 - Beide fragen zur Sicherheit nach: Beim 1. Klick wird der Button rot und zeigt „Sicher? Nochmal klicken“. Ein 2. Klick innerhalb von 4 Sekunden führt die Aktion aus, sonst passiert nichts.
+
+### ⚙ Einstellungen
+
+Ganz unten im aufgeklappten Panel. Alles wird sofort gespeichert – am Code muss nichts mehr geändert werden.
+
+| Einstellung | Wirkung |
+|---|---|
+| **Hinweise einblenden** | Lila Hinweise (Werbung erkannt, Zeit gespart, …) an/aus |
+| **Zahlen in der Box anzeigen** | Aus = die Box zeigt nur noch das 🛡-Symbol (mit ▾ wie gewohnt aufklappbar) |
+| **Durchgerutschte Werbung automatisch protokollieren** | Aus = als durchgerutscht erkannte Werbung wird nicht mehr protokolliert |
+| **Notfall-Modus (stumm & unscharf)** | Dasselbe wie der 🛟-Button |
+| **Sprache** | Automatisch (Browser), Deutsch oder English |
 
 Alles bleibt **nur lokal in deinem Browser**. Es wird nichts an Twitch oder irgendeinen Server geschickt.
 
 ## Tipps
 
 - **Zusätzlich uBlock Origin** (bzw. „uBlock Origin Lite“ in Chrome) zu nutzen schadet nicht – das fängt weitere Tracker und Banner ab. Das Script und uBlock vertragen sich.
-- Den Hinweis abschalten: im Script oben `showNotice: true` auf `false` setzen.
 - Bleibt der Stream schwarz oder lädt nicht: Script im Userscript-Manager kurz deaktivieren und Seite neu laden, um zu prüfen, ob das Script die Ursache ist.
 - Funktioniert die Stream-Werbung nicht mehr, hat Twitch vermutlich etwas geändert. Gut gepflegte Alternativen sind z. B. die Projekte „TwitchAdSolutions“ (vaft) auf GitHub.
 

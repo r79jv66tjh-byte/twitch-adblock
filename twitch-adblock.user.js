@@ -1,8 +1,9 @@
 // ==UserScript==
 // @name         Twitch Adblock (Stream + Banner)
 // @namespace    local.twitch-adblock
-// @version      1.7.0
-// @description  Umgeht Pre-/Mid-Roll-Werbung im Twitch-Stream (Playlist-Austausch) und blendet Werbebanner aus.
+// @version      1.8.0
+// @description  Bypasses pre-/mid-roll ads in the Twitch stream (playlist swap) and hides ad banners. Ad counter with time saved, emergency mode, DE/EN.
+// @description:de Umgeht Pre-/Mid-Roll-Werbung im Twitch-Stream (Playlist-Austausch) und blendet Werbebanner aus. Werbe-Zähler mit gesparter Zeit, Notfall-Modus, DE/EN.
 // @license      MIT
 // @homepageURL https://github.com/r79jv66tjh-byte/twitch-adblock
 // @supportURL   https://github.com/r79jv66tjh-byte/twitch-adblock/issues
@@ -27,10 +28,14 @@
     playerTypes: ['embed', 'popout', 'autoplay'],
     // Öffentliche Client-ID des Twitch-Webplayers
     clientId: 'kimne78kx3ncx6brgo4mv6wki5h1ko',
-    // Kleinen Hinweis im Player anzeigen, während Werbung umgangen wird
-    showNotice: true,
-    // Zähler für abgefangene Werbepausen unten links anzeigen
-    showCounter: true,
+    // Standardwerte der Einstellungen (änderbar im Panel unter ⚙)
+    defaults: {
+      showNotice: true,  // Hinweise einblenden
+      showCounter: true, // Zahlen in der Box anzeigen (aus = nur 🛡-Symbol)
+      autoDetect: true,  // durchgerutschte Werbung automatisch protokollieren
+      emergency: true,   // Notfall-Modus
+      lang: 'auto',      // 'auto' | 'de' | 'en'
+    },
     channelName: 'ttv-adblock',
     // Damit mehrere offene Twitch-Tabs sich nicht gegenseitig mitzählen
     tabId: Math.random().toString(36).slice(2),
@@ -59,6 +64,26 @@
     const streams = new Map();     // URL der Media-Playlist -> { channel, res, fps }
     const backupCache = new Map(); // "kanal|playerType" -> { variants, time, hasAds }
     let adActive = false;
+    let adStart = 0;
+    const adSpots = new Map(); // ID des Werbespots -> Dauer in Sekunden (aus #EXT-X-DATERANGE)
+
+    // Werbespots der aktuellen Pause mit ihrer Länge merken
+    function collectAdSpots(text) {
+      for (const line of text.split('\n')) {
+        if (!line.startsWith('#EXT-X-DATERANGE') || !line.includes('stitched-ad')) continue;
+        const id = (line.match(/[:,]ID="([^"]+)"/) || [])[1];
+        const dur = parseFloat((line.match(/[:,]DURATION=([\d.]+)/) || [])[1]);
+        if (id && dur > 0) adSpots.set(id, dur);
+      }
+    }
+
+    // Gesparte Zeit der Pause: Summe der Spot-Längen, sonst gemessene Dauer (max. 10 min)
+    function adBreakSeconds() {
+      let sum = 0;
+      for (const d of adSpots.values()) sum += d;
+      if (!sum) sum = (Date.now() - adStart) / 1000;
+      return Math.round(Math.min(sum, 600));
+    }
 
     const GQL_QUERY = 'query PlaybackAccessToken_Template($login: String!, $isLive: Boolean!, $vodID: ID!, $isVod: Boolean!, $playerType: String!, $platform: String!) { streamPlaybackAccessToken(channelName: $login, params: {platform: $platform, playerBackend: "mediaplayer", playerType: $playerType}) @include(if: $isLive) { value signature authorization { isForbidden forbiddenReasonCode } __typename } videoPlaybackAccessToken(id: $vodID, params: {platform: $platform, playerBackend: "mediaplayer", playerType: $playerType}) @include(if: $isVod) { value signature __typename } }';
 
@@ -209,7 +234,13 @@
         if (!res.ok) return res;
         let text = await res.text();
         if (hasAds(text)) {
-          if (!adActive) { adActive = true; notify({ type: 'ad-start' }); }
+          if (!adActive) {
+            adActive = true;
+            adStart = Date.now();
+            adSpots.clear();
+            notify({ type: 'ad-start' });
+          }
+          collectAdSpots(text);
           const info = streams.get(url);
           const replacement = info && info.channel ? await getBackupPlaylist(info) : null;
           text = replacement !== null ? replacement : stripAds(text);
@@ -217,7 +248,7 @@
         } else if (adActive) {
           adActive = false;
           backupCache.clear();
-          notify({ type: 'ad-end' });
+          notify({ type: 'ad-end', seconds: adBreakSeconds() });
         }
         return rebuild(res, text);
       }
@@ -291,13 +322,14 @@
       user-select: none; opacity: .8;
     }
     #ttv-adblock-counter:hover, #ttv-adblock-counter.expanded { opacity: 1; }
-    #ttv-adblock-counter.expanded { width: 280px; border-radius: 10px; }
+    #ttv-adblock-counter.expanded { width: 300px; border-radius: 10px; }
     #ttv-adblock-counter.locked { border-color: rgba(145, 70, 255, 0.25); }
     #ttv-adblock-counter .ttv-ab-head {
       display: flex; align-items: center; gap: 4px;
       padding: 4px 6px 4px 9px; cursor: grab; touch-action: none;
     }
-    #ttv-adblock-counter .ttv-ab-head > span { flex: 1; white-space: nowrap; }
+    #ttv-adblock-counter .ttv-ab-head > span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #ttv-adblock-counter .ttv-ab-head > button { flex: none; }
     #ttv-adblock-counter.dragging .ttv-ab-head { cursor: grabbing; }
     #ttv-adblock-counter.locked .ttv-ab-head { cursor: default; }
     #ttv-adblock-counter button {
@@ -315,6 +347,24 @@
     }
     #ttv-adblock-counter .ttv-ab-stats b { font-weight: 600; text-align: right; color: #bf94ff; }
     #ttv-adblock-counter .ttv-ab-stats b.bad { color: #ff8a8a; }
+    #ttv-adblock-counter .ttv-ab-stats b.good { color: #5fe0a5; }
+    #ttv-adblock-counter .ttv-ab-settings-btn {
+      display: block; width: 100%; box-sizing: border-box; margin-top: 10px; padding: 5px 7px;
+      font-size: 11px; font-weight: 600; color: #adadb8; background: rgba(255, 255, 255, 0.05);
+    }
+    #ttv-adblock-counter .ttv-ab-settings-btn:hover { background: rgba(255, 255, 255, 0.12); color: #efeff1; }
+    #ttv-adblock-counter .ttv-ab-settings { display: none; padding: 6px 2px 0; }
+    #ttv-adblock-counter .ttv-ab-settings.open { display: block; }
+    #ttv-adblock-counter .ttv-ab-setting {
+      display: flex; align-items: flex-start; gap: 8px; padding: 4px 0; font-size: 12px; cursor: pointer;
+    }
+    #ttv-adblock-counter .ttv-ab-setting input { margin: 1px 0 0; accent-color: #9146ff; cursor: pointer; }
+    #ttv-adblock-counter .ttv-ab-setting small { display: block; color: #adadb8; font-size: 10px; }
+    #ttv-adblock-counter .ttv-ab-lang { align-items: center; justify-content: space-between; cursor: default; }
+    #ttv-adblock-counter .ttv-ab-lang select {
+      background: #18181b; color: #efeff1; border: 1px solid rgba(145, 70, 255, 0.6);
+      border-radius: 6px; padding: 2px 4px; font-size: 12px;
+    }
     #ttv-adblock-counter .ttv-ab-muted { color: #adadb8; font-size: 11px; margin: 4px 0; }
     #ttv-adblock-counter .ttv-ab-reportrow {
       display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px; margin: 8px 0;
@@ -382,13 +432,14 @@
   else document.addEventListener('DOMContentLoaded', injectCss, { once: true });
 
   // ---------------------------------------------------------------------------
-  // Zähler-Box mit ausklappbarem Panel und Melde-Funktion
+  // Zähler-Box mit ausklappbarem Panel, Melde-Funktion und Einstellungen
   // (alles im localStorage von twitch.tv gespeichert)
   // ---------------------------------------------------------------------------
-  const VERSION = '1.7.0';
+  const VERSION = '1.8.0';
   const STATS_KEY = 'ttvAdblockStats';
   const BOX_KEY = 'ttvAdblockCounterBox';
   const REPORTS_KEY = 'ttvAdblockReports';
+  const SETTINGS_KEY = 'ttvAdblockSettings';
   const MAX_REPORTS = 100;
 
   // Datum in Ortszeit (für „Heute“)
@@ -409,10 +460,10 @@
 
   function loadStats() {
     const s = loadJson(STATS_KEY, null) || {};
-    if (typeof s.total !== 'number') s.total = 0;
-    if (typeof s.today !== 'number') s.today = 0;
-    if (typeof s.leaked !== 'number') s.leaked = 0;
-    if (s.day !== today()) { s.day = today(); s.today = 0; }
+    for (const k of ['total', 'today', 'leaked', 'savedTotal', 'savedToday']) {
+      if (typeof s[k] !== 'number') s[k] = 0;
+    }
+    if (s.day !== today()) { s.day = today(); s.today = 0; s.savedToday = 0; }
     return s;
   }
   const saveStats = (s) => saveJson(STATS_KEY, s);
@@ -422,14 +473,185 @@
     return Array.isArray(r) ? r : [];
   }
 
-  const box = Object.assign({ x: null, y: null, locked: false, expanded: false, sync: false, emergency: true }, loadJson(BOX_KEY, {}));
+  const box = Object.assign({ x: null, y: null, locked: false, expanded: false, sync: false, settingsOpen: false }, loadJson(BOX_KEY, {}));
   const saveBox = () => saveJson(BOX_KEY, box);
+
+  // Einstellungen (ältere Versionen hatten den Notfall-Modus in der Box gespeichert)
+  function loadSettings() {
+    const s = Object.assign({}, CONFIG.defaults, loadJson(SETTINGS_KEY, {}));
+    if (loadJson(SETTINGS_KEY, null) === null && typeof box.emergency === 'boolean') s.emergency = box.emergency;
+    return s;
+  }
+  let settings = loadSettings();
+  const saveSettings = () => saveJson(SETTINGS_KEY, settings);
+
+  // ---------------------------------------------------------------------------
+  // Texte Deutsch / Englisch
+  // ---------------------------------------------------------------------------
+  const TEXT = {
+    de: {
+      locale: 'de-DE',
+      headSaved: (n, d) => '🛡 ' + n + (n === 1 ? ' Werbepause · ' : ' Werbepausen · ') + d + ' gespart',
+      head: (n) => '🛡 ' + n + (n === 1 ? ' Werbepause blockiert' : ' Werbepausen blockiert'),
+      headLocked: 'Doppelklick = Details ein-/ausklappen',
+      headDrag: 'Ziehen = verschieben, Doppelklick = Details ein-/ausklappen',
+      statTab: 'Dieser Tab',
+      statToday: 'Heute',
+      statTotal: 'Insgesamt',
+      statSavedToday: 'Zeit gespart heute',
+      statSavedTotal: 'Zeit gespart insgesamt',
+      statLeaked: 'Durchgerutscht',
+      lastAd: (time, ch, mode) => 'Letzte Werbepause: ' + time + (ch ? ' bei ' + ch : '') + ' (' + mode + ')',
+      noAdYet: 'In diesem Tab noch keine Werbepause.',
+      modeBackup: 'Ersatz-Stream',
+      modeStripped: 'herausgeschnitten',
+      stamp: '⏱ Zeitstempel',
+      stampTitle: 'Kopiert einen Zeitstempel (Uhrzeit, Kanal, Methode) in die Zwischenablage – wird nicht gespeichert',
+      leak: '⚠ Durchgerutscht',
+      leakTitle: 'Speichert die gerade gesehene Werbung im Durchgerutscht-Protokoll (+1)',
+      syncOn: 'Sync AN: Ein Klick auf „Zeitstempel“ oder „Durchgerutscht“ löst beide aus – klicken zum Ausschalten',
+      syncOff: 'Sync AUS: Buttons arbeiten einzeln – klicken, um beide zu koppeln',
+      listTitle: (n) => 'Durchgerutscht – Protokoll (' + n + ')',
+      noReports: 'Keine Meldungen.',
+      auto: 'automatisch',
+      manual: 'manuell',
+      copyLog: '📋 Protokoll kopieren',
+      clearLeaked: '🗑 Durchgerutscht leeren',
+      resetAll: '↺ Zähler zurücksetzen',
+      sure: 'Sicher? Nochmal klicken',
+      copied: '✓ Kopiert',
+      failed: '✗ Fehler',
+      saved: '✓ Gespeichert',
+      cleared: '✓ Geleert',
+      resetDone: '✓ Zurückgesetzt',
+      lockOn: 'Gesperrt – klicken zum Entsperren',
+      lockOff: 'Verschiebbar – klicken zum Sperren',
+      expand: 'Details, Melden & Einstellungen',
+      collapse: 'Einklappen',
+      emergencyOnTitle: 'Notfall-Modus AN: Rutscht Werbung durch, wird sie stumm und unscharf geschaltet – klicken zum Ausschalten',
+      emergencyOffTitle: 'Notfall-Modus AUS – klicken zum Einschalten',
+      emergencyOnNotice: 'Notfall-Modus AN: durchgerutschte Werbung wird stumm & unscharf geschaltet',
+      emergencyOffNotice: 'Notfall-Modus AUS',
+      veil: '🛟 Werbung durchgerutscht – stumm & ausgeblendet',
+      leakLoggedEmergency: 'Werbung ist durchgerutscht – stumm & ausgeblendet, automatisch protokolliert',
+      leakLogged: 'Werbung ist durchgerutscht – automatisch protokolliert',
+      leakEmergency: 'Werbung ist durchgerutscht – stumm & ausgeblendet',
+      noticeBackup: 'Werbung erkannt – werbefreier Ersatz-Stream aktiv',
+      noticeStripped: 'Werbung wird herausgeschnitten – Bild kann kurz stehen bleiben',
+      noticeSaved: (d) => 'Werbepause vorbei – ' + d + ' gespart',
+      settings: '⚙ Einstellungen',
+      setNotice: 'Hinweise einblenden',
+      setCounter: 'Zahlen in der Box anzeigen',
+      setCounterHint: 'Aus = nur das 🛡-Symbol',
+      setAuto: 'Durchgerutschte Werbung automatisch protokollieren',
+      setEmergency: 'Notfall-Modus (stumm & unscharf)',
+      setLang: 'Sprache',
+      langAuto: 'Automatisch (Browser)',
+      stampParts: (date, ch, recent) => [
+        'Werbung nicht blockiert', date, 'Kanal: ' + ch,
+        recent ? 'letzte Methode: ' + recent.mode + ' (vor ' + recent.ago + ' s)' : 'vom Script keine Werbung erkannt',
+      ],
+      logHeader: 'Protokoll',
+      logSummary: (s) => 'Blockierte Werbepausen insgesamt: ' + s.total + ', Zeit gespart: ' + fmtDur(s.savedTotal) + ', durchgerutscht: ' + s.leaked,
+      logAuto: 'automatisch erkannt',
+      logManual: 'manuell gemeldet',
+      logMethod: 'letzte Methode',
+      logNoAd: 'keine Werbung erkannt',
+    },
+    en: {
+      locale: 'en-GB',
+      headSaved: (n, d) => '🛡 ' + n + (n === 1 ? ' ad break · ' : ' ad breaks · ') + d + ' saved',
+      head: (n) => '🛡 ' + n + (n === 1 ? ' ad break blocked' : ' ad breaks blocked'),
+      headLocked: 'Double-click = show/hide details',
+      headDrag: 'Drag = move, double-click = show/hide details',
+      statTab: 'This tab',
+      statToday: 'Today',
+      statTotal: 'Total',
+      statSavedToday: 'Time saved today',
+      statSavedTotal: 'Time saved total',
+      statLeaked: 'Slipped through',
+      lastAd: (time, ch, mode) => 'Last ad break: ' + time + (ch ? ' on ' + ch : '') + ' (' + mode + ')',
+      noAdYet: 'No ad break in this tab yet.',
+      modeBackup: 'replacement stream',
+      modeStripped: 'cut out',
+      stamp: '⏱ Timestamp',
+      stampTitle: 'Copies a timestamp (time, channel, method) to the clipboard – nothing is saved',
+      leak: '⚠ Slipped through',
+      leakTitle: 'Saves the ad you just saw to the slipped-through log (+1)',
+      syncOn: 'Sync ON: clicking "Timestamp" or "Slipped through" triggers both – click to turn off',
+      syncOff: 'Sync OFF: buttons work independently – click to link them',
+      listTitle: (n) => 'Slipped through – log (' + n + ')',
+      noReports: 'No reports.',
+      auto: 'automatic',
+      manual: 'manual',
+      copyLog: '📋 Copy log',
+      clearLeaked: '🗑 Clear slipped through',
+      resetAll: '↺ Reset counters',
+      sure: 'Sure? Click again',
+      copied: '✓ Copied',
+      failed: '✗ Error',
+      saved: '✓ Saved',
+      cleared: '✓ Cleared',
+      resetDone: '✓ Reset',
+      lockOn: 'Locked – click to unlock',
+      lockOff: 'Movable – click to lock',
+      expand: 'Details, reporting & settings',
+      collapse: 'Collapse',
+      emergencyOnTitle: 'Emergency mode ON: ads that slip through are muted and blurred – click to turn off',
+      emergencyOffTitle: 'Emergency mode OFF – click to turn on',
+      emergencyOnNotice: 'Emergency mode ON: ads that slip through are muted & blurred',
+      emergencyOffNotice: 'Emergency mode OFF',
+      veil: '🛟 Ad slipped through – muted & hidden',
+      leakLoggedEmergency: 'Ad slipped through – muted & hidden, logged automatically',
+      leakLogged: 'Ad slipped through – logged automatically',
+      leakEmergency: 'Ad slipped through – muted & hidden',
+      noticeBackup: 'Ad detected – ad-free replacement stream active',
+      noticeStripped: 'Ad is being cut out – picture may freeze briefly',
+      noticeSaved: (d) => 'Ad break over – ' + d + ' saved',
+      settings: '⚙ Settings',
+      setNotice: 'Show notices',
+      setCounter: 'Show numbers in the box',
+      setCounterHint: 'Off = only the 🛡 icon',
+      setAuto: 'Log ads that slip through automatically',
+      setEmergency: 'Emergency mode (mute & blur)',
+      setLang: 'Language',
+      langAuto: 'Automatic (browser)',
+      stampParts: (date, ch, recent) => [
+        'Ad not blocked', date, 'Channel: ' + ch,
+        recent ? 'last method: ' + recent.mode + ' (' + recent.ago + ' s ago)' : 'no ad detected by the script',
+      ],
+      logHeader: 'log',
+      logSummary: (s) => 'Ad breaks blocked in total: ' + s.total + ', time saved: ' + fmtDur(s.savedTotal) + ', slipped through: ' + s.leaked,
+      logAuto: 'detected automatically',
+      logManual: 'reported manually',
+      logMethod: 'last method',
+      logNoAd: 'no ad detected',
+    },
+  };
+
+  function lang() {
+    if (settings.lang === 'de' || settings.lang === 'en') return settings.lang;
+    return /^de\b/i.test(navigator.language || '') ? 'de' : 'en';
+  }
+  const t = (key) => TEXT[lang()][key];
+
+  // Dauer kurz formatieren: 45 s · 12 min · 1 h 13 min
+  function fmtDur(sec) {
+    sec = Math.round(sec || 0);
+    if (sec < 60) return sec + ' s';
+    const m = Math.floor(sec / 60);
+    if (m < 60) return m + ' min';
+    const h = Math.floor(m / 60);
+    return m % 60 ? h + ' h ' + (m % 60) + ' min' : h + ' h';
+  }
+
+  const modeText = (mode) => (mode === 'backup' ? t('modeBackup') : mode === 'stripped' ? t('modeStripped') : '?');
 
   let sessionCount = 0;
   let lastAd = null; // { time, channel, mode } der letzten Werbepause in diesem Tab
   let notice = null;
   let noticeTimer = null;
-  const ui = {};
+  let ui = {};
 
   function el(tag, cls, text) {
     const e = document.createElement(tag);
@@ -446,11 +668,9 @@
 
   function fmtTime(iso) {
     const d = new Date(iso);
-    return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) + ' '
-      + d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+    return d.toLocaleDateString(t('locale'), { day: '2-digit', month: '2-digit' }) + ' '
+      + d.toLocaleTimeString(t('locale'), { hour: '2-digit', minute: '2-digit' });
   }
-
-  const MODE_TEXT = { backup: 'Ersatz-Stream', stripped: 'herausgeschnitten' };
 
   // Box im sichtbaren Bereich halten (z. B. nach Verkleinern des Fensters oder Aufklappen)
   function placeCounter() {
@@ -465,32 +685,33 @@
     ui.root.style.top = y + 'px';
     placeNotice();
   }
+  window.addEventListener('resize', placeCounter);
 
   function updateEmergency() {
-    ui.emergency.classList.toggle('on', !!box.emergency);
-    ui.emergency.title = box.emergency
-      ? 'Notfall-Modus AN: Rutscht Werbung durch, wird sie stumm und unscharf geschaltet – klicken zum Ausschalten'
-      : 'Notfall-Modus AUS – klicken zum Einschalten';
+    if (!ui.root) return;
+    ui.emergency.classList.toggle('on', !!settings.emergency);
+    ui.emergency.title = settings.emergency ? t('emergencyOnTitle') : t('emergencyOffTitle');
+    ui.setEmergency.checked = !!settings.emergency;
   }
 
   function updateLock() {
     ui.root.classList.toggle('locked', !!box.locked);
     ui.lock.textContent = box.locked ? '🔒' : '🔓';
-    ui.lock.title = box.locked ? 'Gesperrt – klicken zum Entsperren' : 'Verschiebbar – klicken zum Sperren';
+    ui.lock.title = box.locked ? t('lockOn') : t('lockOff');
   }
 
   function updateExpanded() {
     ui.root.classList.toggle('expanded', !!box.expanded);
     ui.toggle.textContent = box.expanded ? '▴' : '▾';
-    ui.toggle.title = box.expanded ? 'Einklappen' : 'Details & Melden';
+    ui.toggle.title = box.expanded ? t('collapse') : t('expand');
+    ui.settingsWrap.classList.toggle('open', !!box.settingsOpen);
+    ui.settingsBtn.textContent = t('settings') + (box.settingsOpen ? ' ▴' : ' ▾');
   }
 
   function updateSync() {
     ui.sync.classList.toggle('on', !!box.sync);
     ui.reportRow.classList.toggle('synced', !!box.sync);
-    ui.sync.title = box.sync
-      ? 'Sync AN: Ein Klick auf „Zeitstempel“ oder „Durchgerutscht“ löst beide aus – klicken zum Ausschalten'
-      : 'Sync AUS: Buttons arbeiten einzeln – klicken, um beide zu koppeln';
+    ui.sync.title = box.sync ? t('syncOn') : t('syncOff');
   }
 
   function makeDraggable() {
@@ -520,7 +741,6 @@
     };
     ui.head.addEventListener('pointerup', end);
     ui.head.addEventListener('pointercancel', end);
-    window.addEventListener('resize', placeCounter);
   }
 
   // Bestätigung direkt im Button statt confirm()-Dialog (der kann vom Browser
@@ -540,7 +760,7 @@
         clearTimeout(btn._flashTimer);
         armed = true;
         btn.classList.add('confirm');
-        btn.textContent = 'Sicher? Nochmal klicken';
+        btn.textContent = t('sure');
         timer = setTimeout(disarm, 4000);
         return;
       }
@@ -559,34 +779,32 @@
   function reportsAsText() {
     const s = loadStats();
     const lines = [
-      'Twitch Adblock ' + VERSION + ' – Protokoll',
-      'Blockierte Werbepausen insgesamt: ' + s.total + ', durchgerutscht: ' + s.leaked,
+      'Twitch Adblock ' + VERSION + ' – ' + t('logHeader'),
+      t('logSummary')(s),
       'Browser: ' + navigator.userAgent,
       '',
     ];
     for (const r of loadReports()) {
       lines.push(fmtTime(r.time) + ' | ' + (r.channel || '?') + ' | '
-        + (r.auto ? 'automatisch erkannt' : 'manuell gemeldet')
-        + ' | letzte Methode: ' + (MODE_TEXT[r.mode] || 'keine Werbung erkannt'));
+        + (r.auto ? t('logAuto') : t('logManual'))
+        + ' | ' + t('logMethod') + ': ' + (r.mode ? modeText(r.mode) : t('logNoAd')));
     }
     return lines.join('\n');
   }
 
   // Text für eine manuelle Meldung, z. B.
-  // "Werbung nicht blockiert – 17.10.2026 16:23:05 – Kanal: xyz – letzte Methode: Ersatz-Stream (vor 40 s)"
+  // "Werbung nicht blockiert – 17.10.2026 16:23:05 – Kanal: xyz – letzte Methode: Ersatz-Stream (vor 40 s) – Script 1.8.0"
   function reportStamp() {
     const now = new Date();
     const recent = lastAd && Date.now() - lastAd.time < 5 * 60 * 1000 ? lastAd : null;
-    const parts = [
-      'Werbung nicht blockiert',
-      now.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }) + ' '
-        + now.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-      'Kanal: ' + (currentChannel() || (recent && recent.channel) || '?'),
-      recent
-        ? 'letzte Methode: ' + (MODE_TEXT[recent.mode] || '?') + ' (vor ' + Math.round((Date.now() - recent.time) / 1000) + ' s)'
-        : 'vom Script keine Werbung erkannt',
-      'Script ' + VERSION,
-    ];
+    const date = now.toLocaleDateString(t('locale'), { day: '2-digit', month: '2-digit', year: 'numeric' }) + ' '
+      + now.toLocaleTimeString(t('locale'), { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const parts = t('stampParts')(
+      date,
+      currentChannel() || (recent && recent.channel) || '?',
+      recent ? { mode: modeText(recent.mode), ago: Math.round((Date.now() - recent.time) / 1000) } : null,
+    );
+    parts.push('Script ' + VERSION);
     return parts.join(' – ');
   }
 
@@ -601,6 +819,69 @@
     try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
     ta.remove();
     return ok;
+  }
+
+  function setEmergency(on) {
+    settings.emergency = !!on;
+    saveSettings();
+    updateEmergency();
+    if (!settings.emergency) emergencyOff();
+    showNotice(settings.emergency ? t('emergencyOnNotice') : t('emergencyOffNotice'), 3000);
+  }
+
+  // Einstellungs-Bereich im Panel
+  function buildSettings() {
+    ui.settingsBtn = el('button', 'ttv-ab-settings-btn');
+    ui.settingsWrap = el('div', 'ttv-ab-settings');
+    const check = (label, hint, value, onChange) => {
+      const row = el('label', 'ttv-ab-setting');
+      const input = el('input');
+      input.type = 'checkbox';
+      input.checked = !!value;
+      input.addEventListener('change', () => onChange(input.checked));
+      const txt = el('span', '', label);
+      if (hint) txt.append(el('small', '', hint));
+      row.append(input, txt);
+      ui.settingsWrap.append(row);
+      return input;
+    };
+    check(t('setNotice'), null, settings.showNotice, (v) => {
+      settings.showNotice = v;
+      saveSettings();
+      if (!v) showNotice(null, 0, true);
+    });
+    check(t('setCounter'), t('setCounterHint'), settings.showCounter, (v) => {
+      settings.showCounter = v;
+      saveSettings();
+      renderCounter();
+    });
+    check(t('setAuto'), null, settings.autoDetect, (v) => {
+      settings.autoDetect = v;
+      saveSettings();
+    });
+    ui.setEmergency = check(t('setEmergency'), null, settings.emergency, (v) => setEmergency(v));
+
+    const langRow = el('label', 'ttv-ab-setting ttv-ab-lang');
+    const select = el('select');
+    for (const [val, label] of [['auto', t('langAuto')], ['de', 'Deutsch'], ['en', 'English']]) {
+      const o = el('option', '', label);
+      o.value = val;
+      select.append(o);
+    }
+    select.value = settings.lang;
+    select.addEventListener('change', () => {
+      settings.lang = select.value;
+      saveSettings();
+      rebuildCounter();
+    });
+    langRow.append(el('span', '', t('setLang')), select);
+    ui.settingsWrap.append(langRow);
+
+    ui.settingsBtn.addEventListener('click', () => {
+      box.settingsOpen = !box.settingsOpen;
+      saveBox();
+      renderCounter();
+    });
   }
 
   function buildCounter() {
@@ -629,27 +910,30 @@
       stats.append(el('span', '', label), v);
       return v;
     };
-    ui.vTab = row('Dieser Tab');
-    ui.vToday = row('Heute');
-    ui.vTotal = row('Insgesamt');
-    ui.vLeaked = row('Durchgerutscht', 'bad');
+    ui.vTab = row(t('statTab'));
+    ui.vToday = row(t('statToday'));
+    ui.vTotal = row(t('statTotal'));
+    ui.vSavedToday = row(t('statSavedToday'), 'good');
+    ui.vSavedTotal = row(t('statSavedTotal'), 'good');
+    ui.vLeaked = row(t('statLeaked'), 'bad');
     ui.last = el('div', 'ttv-ab-muted');
     // Melde-Zeile: [Zeitstempel] [Durchgerutscht] [Sync]
     ui.reportRow = el('div', 'ttv-ab-reportrow');
-    ui.stamp = el('button', 'ttv-ab-stamp', '⏱ Zeitstempel');
-    ui.stamp.title = 'Kopiert einen Zeitstempel (Uhrzeit, Kanal, Methode) in die Zwischenablage – wird nicht gespeichert';
-    ui.leak = el('button', 'ttv-ab-leak', '⚠ Durchgerutscht');
-    ui.leak.title = 'Speichert die gerade gesehene Werbung im Durchgerutscht-Protokoll (+1)';
+    ui.stamp = el('button', 'ttv-ab-stamp', t('stamp'));
+    ui.stamp.title = t('stampTitle');
+    ui.leak = el('button', 'ttv-ab-leak', t('leak'));
+    ui.leak.title = t('leakTitle');
     ui.sync = el('button', 'ttv-ab-sync', '🔗');
     ui.reportRow.append(ui.stamp, ui.leak, ui.sync);
-    ui.listTitle = el('h4', '', 'Durchgerutscht (automatisch erkannt)');
+    ui.listTitle = el('h4');
     ui.list = el('ul');
     const actions = el('div', 'ttv-ab-actions');
-    ui.copy = el('button', '', '📋 Protokoll kopieren');
-    ui.clear = el('button', '', '🗑 Durchgerutscht leeren');
-    ui.reset = el('button', '', '↺ Zähler zurücksetzen');
+    ui.copy = el('button', '', t('copyLog'));
+    ui.clear = el('button', '', t('clearLeaked'));
+    ui.reset = el('button', '', t('resetAll'));
     actions.append(ui.copy, ui.clear, ui.reset);
-    ui.panel.append(stats, ui.last, ui.reportRow, ui.listTitle, ui.list, actions);
+    buildSettings();
+    ui.panel.append(stats, ui.last, ui.reportRow, ui.listTitle, ui.list, actions, ui.settingsBtn, ui.settingsWrap);
 
     ui.root.append(ui.head, ui.panel);
     document.body.appendChild(ui.root);
@@ -663,25 +947,18 @@
       box.locked = !box.locked;
       saveBox();
       updateLock();
+      renderCounter();
     });
-    ui.emergency.addEventListener('click', () => {
-      box.emergency = !box.emergency;
-      saveBox();
-      updateEmergency();
-      if (!box.emergency) emergencyOff();
-      showNotice(box.emergency
-        ? 'Notfall-Modus AN: durchgerutschte Werbung wird stumm & unscharf geschaltet'
-        : 'Notfall-Modus AUS', 3000);
-    });
+    ui.emergency.addEventListener('click', () => setEmergency(!settings.emergency));
     // Zeitstempel: nur in die Zwischenablage, nichts speichern
     async function doStamp() {
       const ok = await copyText(reportStamp());
-      flashButton(ui.stamp, ok ? '✓ Kopiert' : '✗ Fehler');
+      flashButton(ui.stamp, ok ? t('copied') : t('failed'));
     }
     // Durchgerutscht: im Protokoll speichern und Zähler +1
     function doLeak() {
       addReport(false);
-      flashButton(ui.leak, '✓ Gespeichert');
+      flashButton(ui.leak, t('saved'));
     }
     // Ist Sync an, löst jeder der beiden Buttons auch den anderen aus
     ui.stamp.addEventListener('click', () => { doStamp(); if (box.sync) doLeak(); });
@@ -698,7 +975,7 @@
     }
     updateSync();
     ui.copy.addEventListener('click', async () => {
-      flashButton(ui.copy, (await copyText(reportsAsText())) ? '✓ Kopiert' : '✗ Fehlgeschlagen');
+      flashButton(ui.copy, (await copyText(reportsAsText())) ? t('copied') : t('failed'));
     });
     confirmClick(ui.clear, () => {
       saveJson(REPORTS_KEY, []);
@@ -706,13 +983,13 @@
       s.leaked = 0;
       saveStats(s);
       renderCounter();
-      flashButton(ui.clear, '✓ Geleert');
+      flashButton(ui.clear, t('cleared'));
     });
     confirmClick(ui.reset, () => {
-      saveStats({ total: 0, today: 0, leaked: 0, day: today() });
+      saveStats({ total: 0, today: 0, leaked: 0, savedTotal: 0, savedToday: 0, day: today() });
       sessionCount = 0;
       renderCounter();
-      flashButton(ui.reset, '✓ Zurückgesetzt');
+      flashButton(ui.reset, t('resetDone'));
     });
 
     updateLock();
@@ -720,37 +997,45 @@
     makeDraggable();
   }
 
+  // Box komplett neu aufbauen (z. B. nach Sprachwechsel)
+  function rebuildCounter() {
+    if (ui.root) ui.root.remove();
+    ui = {};
+    renderCounter();
+  }
+
   function renderCounter() {
-    if (!CONFIG.showCounter || !document.body) return;
+    if (!document.body) return;
     if (!ui.root) buildCounter();
     const s = loadStats();
-    ui.text.textContent = '🛡 ' + s.total + ' Werbepausen blockiert';
-    ui.head.title = box.locked
-      ? 'Doppelklick = Details ein-/ausklappen'
-      : 'Ziehen = verschieben, Doppelklick = Details ein-/ausklappen';
+    ui.text.textContent = !settings.showCounter
+      ? '🛡'
+      : s.savedTotal > 0 ? t('headSaved')(s.total, fmtDur(s.savedTotal)) : t('head')(s.total);
+    ui.head.title = box.locked ? t('headLocked') : t('headDrag');
     updateExpanded();
 
     if (box.expanded) {
       ui.vTab.textContent = String(sessionCount);
       ui.vToday.textContent = String(s.today);
       ui.vTotal.textContent = String(s.total);
+      ui.vSavedToday.textContent = fmtDur(s.savedToday);
+      ui.vSavedTotal.textContent = fmtDur(s.savedTotal);
       ui.vLeaked.textContent = String(s.leaked);
       ui.last.textContent = lastAd
-        ? 'Letzte Werbepause: ' + fmtTime(lastAd.time) + (lastAd.channel ? ' bei ' + lastAd.channel : '')
-          + ' (' + (MODE_TEXT[lastAd.mode] || '?') + ')'
-        : 'In diesem Tab noch keine Werbepause.';
+        ? t('lastAd')(fmtTime(lastAd.time), lastAd.channel, modeText(lastAd.mode))
+        : t('noAdYet');
 
       const reports = loadReports();
       ui.list.replaceChildren();
       if (!reports.length) {
-        ui.list.append(el('li', 'ttv-ab-muted', 'Keine Meldungen.'));
+        ui.list.append(el('li', 'ttv-ab-muted', t('noReports')));
       } else {
         for (const r of reports.slice(0, 20)) {
           ui.list.append(el('li', '', fmtTime(r.time) + ' · ' + (r.channel || '?')
-            + (r.mode ? ' · ' + MODE_TEXT[r.mode] : '') + ' · ' + (r.auto ? 'automatisch' : 'manuell')));
+            + (r.mode ? ' · ' + modeText(r.mode) : '') + ' · ' + (r.auto ? t('auto') : t('manual'))));
         }
       }
-      ui.listTitle.textContent = 'Durchgerutscht – Protokoll (' + reports.length + ')';
+      ui.listTitle.textContent = t('listTitle')(reports.length);
     }
     placeCounter();
   }
@@ -764,7 +1049,16 @@
     renderCounter();
   }
 
-  // Durchgerutschte Werbung speichern (automatisch erkannt: Twitch zeigt seine Werbe-Anzeige)
+  function addSavedTime(seconds) {
+    if (!(seconds > 0)) return;
+    const s = loadStats();
+    s.savedTotal += seconds;
+    s.savedToday += seconds;
+    saveStats(s);
+    renderCounter();
+  }
+
+  // Durchgerutschte Werbung speichern (manuell oder automatisch erkannt)
   function addReport(auto) {
     const recent = lastAd && Date.now() - lastAd.time < 3 * 60 * 1000 ? lastAd : null;
     const reports = loadReports();
@@ -784,15 +1078,20 @@
 
   if (document.body) renderCounter();
   else document.addEventListener('DOMContentLoaded', renderCounter, { once: true });
-  // Box aktualisieren, wenn ein anderer Twitch-Tab gezählt oder gemeldet hat
+  // Box aktualisieren, wenn ein anderer Twitch-Tab gezählt, gemeldet oder umgestellt hat
   window.addEventListener('storage', (e) => {
     if (e.key === STATS_KEY || e.key === REPORTS_KEY) renderCounter();
+    if (e.key === SETTINGS_KEY) {
+      settings = loadSettings();
+      if (!settings.emergency) emergencyOff();
+      rebuildCounter();
+    }
   });
 
-  // Automatische Erkennung: Zeigt Twitch seine eigene Werbe-Anzeige (Label/Countdown),
-  // hat der Player Werbung erkannt, die nicht entfernt wurde.
+  // Erkennung durchgerutschter Werbung: Zeigt Twitch seine eigene Werbe-Anzeige
+  // (Label/Countdown), hat der Player Werbung erkannt, die nicht entfernt wurde.
   const AD_UI_SELECTOR = '[data-a-target="video-ad-label"], [data-a-target="video-ad-countdown"]';
-  let lastAutoReport = 0;
+  let lastLeak = 0;
 
   // Notfall-Modus: durchgerutschte Werbung stumm und unscharf schalten
   const emergency = { active: false, videos: new Map() }; // video -> war vorher stumm?
@@ -805,7 +1104,7 @@
       const host = v.parentElement;
       if (host && !host.querySelector(':scope > .ttv-ab-veil')) {
         if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
-        host.appendChild(el('div', 'ttv-ab-veil', '🛟 Werbung durchgerutscht – stumm & ausgeblendet'));
+        host.appendChild(el('div', 'ttv-ab-veil', t('veil')));
       }
     }
     emergency.active = true;
@@ -824,15 +1123,17 @@
   setInterval(() => {
     const adVisible = !!(document.body && document.querySelector(AD_UI_SELECTOR));
 
-    if (adVisible && box.emergency) emergencyOn();
+    if (adVisible && settings.emergency) emergencyOn();
     else if (emergency.active) emergencyOff();
 
-    if (!adVisible || Date.now() - lastAutoReport < 90 * 1000) return;
-    lastAutoReport = Date.now();
-    addReport(true);
-    showNotice(box.emergency
-      ? 'Werbung ist durchgerutscht – stumm & ausgeblendet, automatisch gemeldet'
-      : 'Werbung ist durchgerutscht – automatisch gemeldet', 6000);
+    // pro durchgerutschter Werbepause nur einmal melden
+    if (!adVisible || Date.now() - lastLeak < 90 * 1000) return;
+    if (!settings.autoDetect && !settings.emergency) return;
+    lastLeak = Date.now();
+    if (settings.autoDetect) addReport(true);
+    showNotice(settings.autoDetect
+      ? (settings.emergency ? t('leakLoggedEmergency') : t('leakLogged'))
+      : t('leakEmergency'), 6000);
   }, 500);
 
   // ---------------------------------------------------------------------------
@@ -853,8 +1154,8 @@
     notice.style.top = top + 'px';
   }
 
-  function showNotice(text, autoHideMs) {
-    if (!CONFIG.showNotice || !document.body) return;
+  function showNotice(text, autoHideMs, force) {
+    if ((!settings.showNotice && !force) || !document.body) return;
     if (!notice) {
       notice = el('div');
       notice.id = 'ttv-adblock-notice';
@@ -883,12 +1184,12 @@
         lastAd = lastAd || { time: Date.now() };
         lastAd.mode = msg.mode;
         if (msg.channel) lastAd.channel = msg.channel;
-        showNotice(msg.mode === 'backup'
-          ? 'Werbung erkannt – werbefreier Ersatz-Stream aktiv'
-          : 'Werbung wird herausgeschnitten – Bild kann kurz stehen bleiben');
+        showNotice(msg.mode === 'backup' ? t('noticeBackup') : t('noticeStripped'));
         if (box.expanded) renderCounter();
       } else if (msg.type === 'ad-end') {
-        showNotice(null);
+        addSavedTime(msg.seconds);
+        if (msg.seconds > 0) showNotice(t('noticeSaved')(fmtDur(msg.seconds)), 4000);
+        else showNotice(null);
       }
     };
   }
