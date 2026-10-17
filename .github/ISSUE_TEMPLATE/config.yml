@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: "📖 Anleitung (Deutsch)"
+    url: https://github.com/r79jv66tjh-byte/twitch-adblock/blob/main/README.de.md
+    about: "Installation, Funktionen und Hinweise zur Fehlersuche"
+  - name: "📖 Guide (English)"
+    url: https://github.com/r79jv66tjh-byte/twitch-adblock/blob/main/README.md
+    about: "Installation, features and troubleshooting"

@@ -7,7 +7,7 @@ Blocks or bypasses on twitch.tv:
 - **Ads in the stream** (pre-rolls and mid-rolls)
 - **Ad banners and overlays** on the page (display ads, "Ad" label, countdown, Amazon ad iframes)
 
-> The script itself is available in **English and German** (switchable in the settings).
+Plus: ad counter with time saved, emergency mode, picture repair, history, troubleshooting log – in English and German.
 
 ## Important – an honest assessment
 
@@ -17,7 +17,7 @@ Twitch inserts ads **server-side directly into the video stream** ("stitched ads
 2. It requests a **second stream** from Twitch with a different player type (e.g. "embed"), which is often ad-free, and plays it during the ad break.
 3. If that fails, it **cuts the ad segments out**. The picture may then freeze or go black for the length of the ad – but you won't see or hear the ad.
 
-**No blocker can guarantee that all ads disappear.** Twitch changes its system regularly; the script may then stop working partially or completely overnight. During an ad break the quality may drop briefly (the replacement stream sometimes only has a lower resolution) or the stream may stutter. Ads on VODs (recordings) are not handled.
+**No blocker can guarantee that all ads disappear.** Twitch changes its system regularly; the script may then stop working partially or completely overnight. During an ad break the quality may drop briefly or the stream may stutter.
 
 Legal notice: Blocking ads may violate Twitch's Terms of Service. Use at your own risk. If you want to support streamers, consider subscriptions or Twitch Turbo.
 
@@ -32,8 +32,6 @@ Install **one** of these extensions from your browser's official store:
 
 ### 2. Chrome/Edge only: allow userscripts
 
-Recent versions of Chrome and Edge require an extra permission:
-
 - Right-click the Tampermonkey icon → **Manage extension**
 - Turn on **"Allow User Scripts"**
 - If that switch doesn't exist: enable **Developer mode** in the top right of `chrome://extensions` or `edge://extensions`.
@@ -41,98 +39,124 @@ Recent versions of Chrome and Edge require an extra permission:
 ### 3. Add the script
 
 **Recommended – directly from GitHub (with automatic updates):**
-Click **[install twitch-adblock.user.js](https://raw.githubusercontent.com/r79jv66tjh-byte/twitch-adblock/main/twitch-adblock.user.js)**. Tampermonkey/Violentmonkey opens the install page → click **Install**.
-Installed this way, Tampermonkey checks for new versions on its own (manually: Tampermonkey icon → **Check for userscript updates**).
+Click **[install twitch-adblock.user.js](https://raw.githubusercontent.com/r79jv66tjh-byte/twitch-adblock/main/twitch-adblock.user.js)** → Tampermonkey/Violentmonkey opens the install page → **Install**.
 
-**Option A – drag & drop:**
-Drag the file `twitch-adblock.user.js` into a browser window. Tampermonkey/Violentmonkey opens the install page → click **Install**.
-
-**Option B – manually:**
-1. Click the Tampermonkey icon → **Create a new script**
-2. Delete the whole template text
-3. Paste the contents of `twitch-adblock.user.js`
-4. Save with **Ctrl + S**
+Alternatively: drag the file `twitch-adblock.user.js` into a browser window, or in Tampermonkey **Create a new script**, paste the contents and save with **Ctrl + S**.
 
 ### 4. Test
 
 1. **Reload** the Twitch tab (preferably Ctrl + F5).
 2. Open a channel. The counter "🛡 0 ad breaks blocked" appears in the bottom left.
-3. When an ad starts, a purple notice appears above it:
-   - "Ad detected – ad-free replacement stream active" or
-   - "Ad is being cut out – picture may freeze briefly"
-4. After the ad break you briefly see how much time you saved, e.g. "Ad break over – 45 s saved".
+3. When an ad starts, a purple notice appears above it ("Ad detected – ad-free replacement stream active" or "Ad is being cut out"), afterwards e.g. "Ad break over – 45 s saved".
 
-## Language
+## The box
 
-The script speaks **English and German**. By default it follows your browser language (German browser → German, otherwise English). You can change it in the panel under **⚙ Settings → Language**.
+In the bottom left the box shows e.g. **"🛡 42 ad breaks · 1 h 13 min saved"** (time saved = sum of the ad spot lengths Twitch writes into the stream).
 
-## Ad counter
+| Element | Function |
+|---|---|
+| **Drag the top row** | Move the box (position is saved) |
+| **⬆** | Appears when an update is available – click to install |
+| **🛠** | Appears in dev mode – click to turn it off |
+| **🛟** | Emergency mode on (green) / off (grey) |
+| **▾ / ▴** | Expand/collapse the panel (also by double-clicking the top row) |
+| **🔓 / 🔒** | Box movable / locked |
 
-- In the bottom left the script shows how many **ad breaks** were blocked and how much **time** that saved you, e.g. **"🛡 42 ad breaks · 1 h 13 min saved"**. One ad break can contain several spots; the break is counted.
-- **Time saved:** Twitch writes the length of every ad spot into the stream. The script adds these up per ad break (if a length is missing, it measures how long the break took).
-- **Move:** drag the box by its top row to wherever you like. The position is saved and survives reloads.
-- **Lock:** click the lock. 🔓 = movable, 🔒 = locked (can't be moved by accident). Click again to unlock.
-- **🛟 Emergency mode:** the lifebuoy button turns it on (green) and off (grey). When it's on and an ad still slips through (Twitch shows its "Ad" label or countdown), the stream is **muted and heavily blurred** until the ad is over. Afterwards everything returns to how it was, including the volume. On by default. Note: while emergency mode is active, the sound is muted again and again – if you want to hear the ad, turn the mode off briefly.
-- **Expand:** click ▾ (or double-click the row). ▴ collapses it again. The state is saved.
-- The purple notice always appears directly above the box (or below it if the box is at the very top).
-- Everything is stored in twitch.tv's browser storage and survives reloads and browser restarts. Clearing Twitch's site data resets everything.
+**🛟 Emergency mode:** if an ad still slips through (Twitch shows its "Ad" label or countdown), the stream is **muted and heavily blurred** until the ad is over. Afterwards everything returns to how it was.
 
-### Expanded panel
+### Panel (normal view)
 
-- **Statistics:** this tab / today / total blocked, **time saved today / total** (green) and **slipped through** (red).
-- **Last ad break:** time, channel and method (replacement stream or cut out).
-- **Report row** with three buttons side by side:
-  - **⏱ Timestamp:** copies a timestamp to the clipboard **without saving anything**. Paste with Ctrl + V, e.g.:
-    `Ad not blocked – 17/10/2026 16:23:05 – Channel: xyz – last method: replacement stream (40 s ago) – Script 1.9.0`
-  - **⚠ Slipped through:** saves the ad you just saw to the slipped-through log and increases the counter by 1.
-  - **🔗 Sync:** links the two buttons. With sync on (green), clicking *either* button triggers **both**. Grey = off, the buttons work independently. The setting is saved.
-- **Automatic detection:** if Twitch shows its own ad UI in the player (the "Ad" label or countdown), this is saved to the slipped-through log and "Ad slipped through" is shown briefly. This is a hint, not reliable detection: not every ad that slips through is caught this way.
-- **Slipped through – log:** list of all cases (manual or automatic), up to 100 are kept.
-- **📋 Copy log:** copies the full log as text to the clipboard (see "Troubleshooting log" below).
-- **🗑 Clear slipped through:** deletes the log and resets the "slipped through" counter to 0. Blocked ad breaks and time saved are kept.
-- **↺ Reset counters:** resets all counters (including time saved) to 0.
-- Both ask for confirmation: on the 1st click the button turns red and shows "Sure? Click again". A 2nd click within 4 seconds performs the action; otherwise nothing happens.
+- **Statistics:** today, total, time saved today/total (green), slipped through (red)
+- **⚠ Slipped through:** click when you still see an ad – it's saved to the log (shortcut **Alt + W**)
+- **📊 History & channels:** bar chart of the last 7 days and the channels with the most ads
+- **🐞 Report a problem** and **🔄 Check for updates**
+- **⚙ Settings**
+- Footer: **version** and a "What's new?" link
+
+### 🛠 Dev mode
+
+For troubleshooting (Settings → Display → Dev mode). Additionally visible:
+
+- "This tab", last ad break with method, **last problem** (yellow = warning, red = error)
+- **⏱ Timestamp** (copies time, channel, method – saves nothing, **Alt + Z**) and **🔗 Sync** (links timestamp and slipped through)
+- **Slipped-through log** and **event list** (last 15 entries)
+- **📋 Copy log**, **🗑 Clear slipped through**, **↺ Reset counters** (deleting asks for confirmation: 1st click "Sure? Click again", 2nd click within 4 s)
+
+The log is **always** recorded in the background – even with dev mode off.
 
 ### ⚙ Settings
 
-At the bottom of the expanded panel. All settings are saved immediately – no need to edit the code.
+Everything is saved immediately.
 
-| Setting | What it does |
-|---|---|
-| **Show notices** | Purple notices (ad detected, time saved, …) on/off |
-| **Show numbers in the box** | Off = the box only shows the 🛡 icon (click ▾ to expand it as usual) |
-| **Log ads that slip through automatically** | Off = ads detected as slipped through are no longer logged |
-| **Emergency mode (mute & blur)** | Same as the 🛟 button |
-| **Language** | Automatic (browser), Deutsch or English |
+| Setting | Effect | Default |
+|---|---|---|
+| **Display** | | |
+| Show notices | Purple notices on/off | on |
+| Show numbers in the box | Off = only the 🛡 icon | on |
+| 🛠 Dev mode | Troubleshooting tools | off |
+| Language | Automatic (browser), Deutsch, English | automatic |
+| **Blocker** | | |
+| Emergency mode | Mute & blur ads that slip through | on |
+| Log ads that slip through automatically | Logs ads that Twitch shows | on |
+| Repair frozen picture automatically | Picture frozen > 10 s: jump to live picture → restart player → reload page (max. every 5 min) | on |
+| Filter ads in recordings (VODs) | Experimental, takes effect after reload | off |
+| **Extras** | | |
+| Keyboard shortcuts | Alt + W = slipped through, Alt + Z = timestamp (not while typing in chat) | on |
+| Check for updates daily | Checks GitHub once a day, shows ⬆ for a new version | on |
+| Hide Turbo ads | Hides Turbo prompts | off |
+| Hide Prime Gaming banners | Hides Prime Gaming prompts | off |
+| Stop the video on the front page | Stops the autoplaying video on twitch.tv | off |
+| **💾 Back up / 📂 Restore** | Counters, history, settings and log as a file, e.g. for a new PC | |
 
-Everything stays **only locally in your browser**. Nothing is sent to Twitch or any server.
+Everything stays **only locally in your browser** (twitch.tv storage). Nothing is sent to Twitch or any server – except the daily update check on GitHub (only downloads the script file, sends no data).
+
+## Updates
+
+- Installed via the GitHub link, Tampermonkey fetches new versions on its own (about once a day).
+- In addition, the box shows **⬆** as soon as a new version exists. Click it → **Update** in Tampermonkey.
+- Right away: **🔄 Check for updates** in the panel, or Tampermonkey icon → **Check for userscript updates**.
+- After an update, a short "what's new" notice appears. All changes: [CHANGELOG.md](CHANGELOG.md).
+
+## Reporting problems – the best way
+
+1. **Latest version?** Click **🔄 Check for updates** in the panel – many problems are already fixed.
+2. **Is it the script?** Briefly disable the script in the Tampermonkey menu and reload with Ctrl + F5. If the problem is gone, it's the script – otherwise it's probably Twitch (e.g. the channel really is offline).
+3. **Reproduce it:** enable the script again, open the channel and wait for the problem. For an ad that slipped through: click **⚠ Slipped through** right away (or **Alt + W**) – then the exact time is in the log.
+4. **Report:** expand the box → **🐞 Report a problem**. The log is copied to the clipboard and the form on GitHub opens (you need a free GitHub account).
+5. **Fill in the form:** what happened, channel, short description – and paste with **Ctrl + V** into the **"Log"** field. Submit.
+
+**What's in the log?** Script version, browser version, current page (channel name), settings, the last 100 events (e.g. "Stream loaded", "Ad break blocked", errors) and the slipped-through log. **No** passwords, login data or chat contents. Note: GitHub issues are public – have a quick look before submitting.
+
+Without a GitHub account: enable dev mode → **📋 Copy log** and share the log another way.
 
 ## Troubleshooting log
 
-The script automatically records what happens – so you don't need the browser console (F12) to find problems:
+The script automatically records what happens – no browser console (F12) needed:
 
-- **Stream status:** what Twitch answers when the stream is loaded, e.g. "Stream loaded: xyz (6 qualities)" or **"Twitch reports xyz as OFFLINE (HTTP 404)"** / "Twitch denies the stream (HTTP 403)".
-- **Video worker:** whether the script could hook into the Twitch player (if not, stream ads are not filtered).
-- **Ad breaks:** blocked breaks with method and time saved, problems with the replacement stream.
-- **Errors:** script errors, video errors and error messages of the Twitch player (e.g. "Error #2000").
+- **Stream status:** what Twitch answers when loading, e.g. "Stream loaded: xyz (6 qualities)" or **"Twitch reports xyz as OFFLINE (HTTP 404)"** / "Twitch denies the stream (HTTP 403)"
+- **Video worker:** whether the script could hook into the Twitch player (if not, stream ads are not filtered)
+- **Ad breaks:** blocked breaks with method and time saved, problems with the replacement stream
+- **Picture repair:** when the picture froze and which repair worked
+- **Errors:** script errors, video errors and error messages of the player (e.g. "Error #2000")
 
-In the expanded panel the **last problem** of the past 24 hours is shown (yellow = warning, red = error). **📋 Copy log** copies everything – version, browser, page, settings, the last 100 events and the slipped-through log – so you can paste it into an [issue](https://github.com/r79jv66tjh-byte/twitch-adblock/issues). The script stores up to 200 events; older ones are removed automatically.
+Up to 200 events are stored; older ones are removed automatically.
 
-If the stream is shown as offline: if the log says "OFFLINE (HTTP 404)", Twitch itself reports the channel as offline – that's not caused by the script. Its own errors are marked "Script error, stream continues without filter"; in that case the stream keeps loading normally without the ad filter.
+**Stream shown as offline?** If the log says "OFFLINE (HTTP 404)", Twitch itself reports the channel as offline – that's not caused by the script. Its own errors are marked "Script error, stream continues without filter"; the stream then loads normally, just without the ad filter.
 
 ## Tips
 
-- Using **uBlock Origin** (or "uBlock Origin Lite" in Chrome) in addition doesn't hurt – it catches more trackers and banners. The script and uBlock work fine together.
-- If the stream stays black or won't load: briefly disable the script in the userscript manager and reload the page to check whether the script is the cause.
-- If stream ads are no longer blocked, Twitch has probably changed something. Well-maintained alternatives include the "TwitchAdSolutions" (vaft) project on GitHub.
+- Using **uBlock Origin** (or "uBlock Origin Lite" in Chrome) in addition doesn't hurt – it catches more trackers and banners.
+- If stream ads are no longer blocked, Twitch has probably changed something – please report it (see above). Well-maintained alternatives include the "TwitchAdSolutions" (vaft) project on GitHub.
 
 ## Files
 
 | File | Contents |
 |---|---|
 | `twitch-adblock.user.js` | The userscript |
-| `README.md` | This guide (English) |
-| `README.de.md` | Guide in German |
+| `README.md` / `README.de.md` | Guide in English / German |
+| `CHANGELOG.md` | All changes per version |
+| `.github/ISSUE_TEMPLATE/` | Forms for bug reports and ideas |
+| `.github/workflows/check.yml` | Automatic check on every push |
 | `LICENSE` | MIT license |
 
 ## License
@@ -142,10 +166,12 @@ If the stream is shown as offline: if the log says "OFFLINE (HTTP 404)", Twitch 
 ## Publishing a new version (for the repo owner)
 
 1. Make changes in `twitch-adblock.user.js`.
-2. **Increase `@version`** at the top of the script (e.g. `1.6.0` → `1.6.1`) and the `VERSION` constant further down as well – Tampermonkey & co. only fetch the update when the version number is higher.
-3. Commit and push:
+2. Increase **`@version`** at the top and the **`VERSION`** constant (e.g. `2.0.0` → `2.0.1`), and update `WHATS_NEW`.
+3. Add an entry to **`CHANGELOG.md`** (otherwise the automatic check fails).
+4. Commit, push and create a release:
    ```bash
    git add -A
-   git commit -m "Version 1.6.1: short description"
+   git commit -m "Version 2.0.1: short description"
    git push
+   gh release create v2.0.1 --title "2.0.1" --notes "short description"
    ```

@@ -1,0 +1,17 @@
+name: "💡 Idee / Feature request"
+description: "Suggest an improvement / Verbesserung vorschlagen"
+title: "[Idee] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: "Idea / Idee"
+      description: "What should the script do? / Was soll das Script können?"
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: "Why? / Wozu?"
+      description: "Which problem would it solve? / Welches Problem würde es lösen?"

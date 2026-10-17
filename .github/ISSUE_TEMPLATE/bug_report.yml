@@ -1,0 +1,59 @@
+name: "🐞 Problem / Fehler melden"
+description: "Ad slipped through, stream offline/black, error … / Werbung durchgerutscht, Stream offline/schwarz, Fehler …"
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **EN:** Thanks for reporting! The quickest way: click **🐞 Report a problem** in the box on Twitch – the log is then already in your clipboard, just paste it below with Ctrl+V.
+        **DE:** Danke für die Meldung! Am schnellsten: In der Box auf Twitch auf **🐞 Fehler melden** klicken – das Protokoll liegt dann schon in der Zwischenablage, unten einfach mit Strg+V einfügen.
+  - type: dropdown
+    id: problem
+    attributes:
+      label: "What happened? / Was ist passiert?"
+      options:
+        - "Ad slipped through / Werbung ist durchgerutscht"
+        - "Stream offline, black or not loading / Stream offline, schwarz oder lädt nicht"
+        - "Picture freezes / Bild bleibt hängen"
+        - "Box / display problem / Problem mit der Box bzw. Anzeige"
+        - "Something else / Etwas anderes"
+    validations:
+      required: true
+  - type: input
+    id: channel
+    attributes:
+      label: "Channel / Kanal"
+      placeholder: "z. B. / e.g. twitchname"
+  - type: textarea
+    id: description
+    attributes:
+      label: "Description / Beschreibung"
+      description: "What did you do, what did you expect, what happened instead? / Was hast du gemacht, was hast du erwartet, was ist stattdessen passiert?"
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: "Log / Protokoll"
+      description: "Paste with Ctrl+V (from 🐞 Report a problem or 📋 Copy log). / Mit Strg+V einfügen (aus 🐞 Fehler melden oder 📋 Protokoll kopieren)."
+      render: text
+    validations:
+      required: true
+  - type: dropdown
+    id: browser
+    attributes:
+      label: "Browser"
+      options: ["Chrome", "Edge", "Firefox", "Opera / Brave / Vivaldi", "Other / Anderer"]
+  - type: dropdown
+    id: manager
+    attributes:
+      label: "Userscript manager"
+      options: ["Tampermonkey", "Violentmonkey", "Other / Anderer"]
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: "Checks / Prüfungen"
+      options:
+        - label: "I use the latest version (🔄 Check for updates) / Ich nutze die neueste Version (🔄 Nach Updates suchen)"
+        - label: "With the script disabled, the problem does not occur / Mit ausgeschaltetem Script tritt das Problem nicht auf"

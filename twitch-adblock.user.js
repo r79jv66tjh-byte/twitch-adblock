@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Adblock (Stream + Banner)
 // @namespace    local.twitch-adblock
-// @version      1.9.0
+// @version      2.0.0
 // @description  Bypasses pre-/mid-roll ads in the Twitch stream (playlist swap) and hides ad banners. Ad counter with time saved, emergency mode, DE/EN.
 // @description:de Umgeht Pre-/Mid-Roll-Werbung im Twitch-Stream (Playlist-Austausch) und blendet Werbebanner aus. Werbe-Zähler mit gesparter Zeit, Notfall-Modus, DE/EN.
 // @license      MIT
@@ -35,6 +35,14 @@
       autoDetect: true,  // durchgerutschte Werbung automatisch protokollieren
       emergency: true,   // Notfall-Modus
       lang: 'auto',      // 'auto' | 'de' | 'en'
+      devMode: false,    // Werkzeuge zur Fehlersuche im Panel anzeigen
+      autoRecover: true, // hängendes Bild automatisch reparieren
+      shortcuts: true,   // Alt+W = Durchgerutscht, Alt+Z = Zeitstempel
+      updateCheck: true, // einmal am Tag auf GitHub nach Updates suchen
+      hideTurbo: false,  // Turbo-Werbung ausblenden
+      hidePrime: false,  // Prime-Gaming-Banner ausblenden
+      stopFrontpage: false, // automatisch startendes Video auf der Startseite stoppen
+      vod: false,        // Werbung in Aufzeichnungen filtern (experimentell)
     },
     channelName: 'ttv-adblock',
     // Damit mehrere offene Twitch-Tabs sich nicht gegenseitig mitzählen
@@ -153,6 +161,24 @@
           continue;
         }
         if (line.startsWith('#EXT-X-TWITCH-PREFETCH:')) continue;
+        if (line.startsWith('#EXT-X-DATERANGE') && line.includes('stitched-ad')) continue;
+        out.push(line);
+      }
+      return out.join('\n');
+    }
+
+    // VODs: Inhalts-Segmente haben keinen Titel, Werbe-Segmente einen (z. B. „Amazon“)
+    function stripVodAds(text) {
+      const lines = text.split('\n');
+      const out = [];
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const title = line.startsWith('#EXTINF') ? (line.split(',')[1] || '').trim() : '';
+        if (title && title !== 'live') {
+          while (i + 1 < lines.length && lines[i + 1].startsWith('#') && !lines[i + 1].startsWith('#EXTINF')) i++;
+          if (i + 1 < lines.length && !lines[i + 1].startsWith('#')) i++;
+          continue;
+        }
         if (line.startsWith('#EXT-X-DATERANGE') && line.includes('stitched-ad')) continue;
         out.push(line);
       }
@@ -286,6 +312,16 @@
         return rebuild(res, text);
       }
 
+      // Aufzeichnungen (VODs), experimentell: eingebettete Werbung herausschneiden
+      if (cfg.vod && url.includes('.m3u8') && !url.includes('usher.ttvnw.net')) {
+        const res = await realFetch(input, init);
+        if (!res.ok) return res;
+        const text = await res.text();
+        if (!hasAds(text)) return rebuild(res, text);
+        logOnce('vodAd', 'info', 'vodAd', {});
+        return rebuild(res, stripVodAds(text));
+      }
+
       return realFetch(input, init);
     }
 
@@ -327,7 +363,11 @@
         super(scriptURL, options);
         return;
       }
-      const code = '(' + workerMain.toString() + ')(' + JSON.stringify(CONFIG) + ');\n' + src;
+      // VOD-Filter ist eine Einstellung – gilt für neu gestartete Player
+      let vod = false;
+      try { vod = !!settings.vod; } catch (e) { /* Einstellungen noch nicht geladen */ }
+      const cfg = Object.assign({}, CONFIG, { vod });
+      const code = '(' + workerMain.toString() + ')(' + JSON.stringify(cfg) + ');\n' + src;
       super(URL.createObjectURL(new Blob([code], { type: 'application/javascript' })), options);
       logEvent('info', 'workerPatched', {});
     }
@@ -389,7 +429,7 @@
       display: none; padding: 4px 10px 10px; color: #efeff1; font-weight: 400;
       border-top: 1px solid rgba(145, 70, 255, 0.3);
     }
-    #ttv-adblock-counter.expanded .ttv-ab-panel { display: block; }
+    #ttv-adblock-counter.expanded .ttv-ab-panel { display: block; max-height: calc(100vh - 48px); overflow-y: auto; overscroll-behavior: contain; }
     #ttv-adblock-counter .ttv-ab-stats {
       display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; margin: 6px 0;
     }
@@ -402,13 +442,39 @@
       background: rgba(255, 180, 0, 0.12); color: #ffd37a; border: 1px solid rgba(255, 180, 0, 0.35);
     }
     #ttv-adblock-counter .ttv-ab-issue.error { background: rgba(235, 4, 0, 0.15); color: #ffb3b3; border-color: rgba(255, 90, 90, 0.5); }
-    #ttv-adblock-counter .ttv-ab-settings-btn {
-      display: block; width: 100%; box-sizing: border-box; margin-top: 10px; padding: 5px 7px;
+    #ttv-adblock-counter button[hidden] { display: none !important; }
+    #ttv-adblock-counter:not(.dev) .ttv-ab-dev { display: none !important; }
+    #ttv-adblock-counter:not(.dev) .ttv-ab-reportrow { grid-template-columns: 1fr; }
+    #ttv-adblock-counter .ttv-ab-update { color: #5fe0a5; font-weight: 700; background: rgba(0, 200, 120, 0.2); }
+    #ttv-adblock-counter .ttv-ab-devbtn { background: rgba(255, 180, 0, 0.18); }
+    #ttv-adblock-counter .ttv-ab-wide {
+      display: block; width: 100%; box-sizing: border-box; margin-top: 8px; padding: 5px 7px;
       font-size: 11px; font-weight: 600; color: #adadb8; background: rgba(255, 255, 255, 0.05);
     }
-    #ttv-adblock-counter .ttv-ab-settings-btn:hover { background: rgba(255, 255, 255, 0.12); color: #efeff1; }
-    #ttv-adblock-counter .ttv-ab-settings { display: none; padding: 6px 2px 0; }
-    #ttv-adblock-counter .ttv-ab-settings.open { display: block; }
+    #ttv-adblock-counter .ttv-ab-wide:hover { background: rgba(255, 255, 255, 0.12); color: #efeff1; }
+    #ttv-adblock-counter .ttv-ab-fold { display: none; padding: 4px 2px 0; }
+    #ttv-adblock-counter .ttv-ab-fold.open { display: block; }
+    #ttv-adblock-counter .ttv-ab-chart { display: flex; gap: 4px; align-items: flex-end; height: 74px; margin: 4px 0 6px; }
+    #ttv-adblock-counter .ttv-ab-bar { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; height: 100%; }
+    #ttv-adblock-counter .ttv-ab-bar b { font-size: 10px; color: #bf94ff; }
+    #ttv-adblock-counter .ttv-ab-bar small { font-size: 10px; color: #adadb8; }
+    #ttv-adblock-counter .ttv-ab-barbox { flex: 1; width: 100%; display: flex; align-items: flex-end; background: rgba(255, 255, 255, 0.04); border-radius: 3px; }
+    #ttv-adblock-counter .ttv-ab-barbox i { display: block; width: 100%; min-height: 1px; background: #9146ff; border-radius: 3px; }
+    #ttv-adblock-counter .ttv-ab-events { max-height: 160px; }
+    #ttv-adblock-counter .ttv-ab-events li.lvl-warn { color: #ffd37a; }
+    #ttv-adblock-counter .ttv-ab-events li.lvl-error { color: #ffb3b3; }
+    #ttv-adblock-counter .ttv-ab-footer { margin-top: 8px; font-size: 10px; color: #adadb8; text-align: center; }
+    #ttv-adblock-counter .ttv-ab-footer a { color: #bf94ff; text-decoration: none; }
+    #ttv-adblock-counter .ttv-ab-footer a:hover { text-decoration: underline; }
+    html.ttv-ab-hide-turbo a[href*="/turbo"],
+    html.ttv-ab-hide-turbo [data-a-target*="turbo"],
+    html.ttv-ab-hide-turbo button[aria-label*="Turbo"],
+    html.ttv-ab-hide-prime [data-a-target="prime-offers-icon"],
+    html.ttv-ab-hide-prime .top-nav__prime,
+    html.ttv-ab-hide-prime a[href*="gaming.amazon.com"],
+    html.ttv-ab-hide-prime a[href*="primegaming"] {
+      display: none !important;
+    }
     #ttv-adblock-counter .ttv-ab-setting {
       display: flex; align-items: flex-start; gap: 8px; padding: 4px 0; font-size: 12px; cursor: pointer;
     }
@@ -486,23 +552,38 @@
   else document.addEventListener('DOMContentLoaded', injectCss, { once: true });
 
   // ---------------------------------------------------------------------------
-  // Zähler-Box mit ausklappbarem Panel, Melde-Funktion und Einstellungen
+  // Zähler-Box mit Panel, Melde-Funktion, Statistik und Einstellungen
   // (alles im localStorage von twitch.tv gespeichert)
   // ---------------------------------------------------------------------------
-  const VERSION = '1.9.0';
+  const VERSION = '2.0.0';
+  const REPO_URL = 'https://github.com/r79jv66tjh-byte/twitch-adblock';
+  const RAW_URL = 'https://raw.githubusercontent.com/r79jv66tjh-byte/twitch-adblock/main/twitch-adblock.user.js';
+  const ISSUE_URL = REPO_URL + '/issues/new?template=bug_report.yml';
+  const CHANGELOG_URL = REPO_URL + '/blob/main/CHANGELOG.md';
+
   const STATS_KEY = 'ttvAdblockStats';
   const BOX_KEY = 'ttvAdblockCounterBox';
   const REPORTS_KEY = 'ttvAdblockReports';
   const SETTINGS_KEY = 'ttvAdblockSettings';
   const EVENTS_KEY = 'ttvAdblockEvents';
-  const MAX_EVENTS = 200;
+  const UPDATE_KEY = 'ttvAdblockUpdate';
+  const SEEN_KEY = 'ttvAdblockSeenVersion';
+  const RELOAD_KEY = 'ttvAdblockLastReload';
   const MAX_REPORTS = 100;
+  const MAX_EVENTS = 200;
 
-  // Datum in Ortszeit (für „Heute“)
-  function today() {
-    const d = new Date();
+  // Kurzinfo „Was ist neu“ zur aktuellen Version
+  const WHATS_NEW = {
+    de: 'Dev-Modus, Update-Hinweis, „Fehler melden“, Bild-Reparatur, Verlauf & Kanal-Statistik, Tastenkürzel, Sichern/Wiederherstellen',
+    en: 'dev mode, update notice, "report a problem", picture repair, history & channel stats, keyboard shortcuts, backup/restore',
+  };
+
+  // Datum in Ortszeit (für „Heute“ und den Verlauf)
+  function dayKey(d) {
+    d = d || new Date();
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   }
+  const today = () => dayKey();
 
   function loadJson(key, fallback) {
     try {
@@ -519,17 +600,34 @@
     for (const k of ['total', 'today', 'leaked', 'savedTotal', 'savedToday']) {
       if (typeof s[k] !== 'number') s[k] = 0;
     }
+    if (!s.days || typeof s.days !== 'object') s.days = {};         // Tag -> { ads, saved }
+    if (!s.channels || typeof s.channels !== 'object') s.channels = {}; // Kanal -> { ads, saved, leaked }
     if (s.day !== today()) { s.day = today(); s.today = 0; s.savedToday = 0; }
     return s;
   }
-  const saveStats = (s) => saveJson(STATS_KEY, s);
+  function saveStats(s) {
+    // Verlauf auf 30 Tage begrenzen
+    const keys = Object.keys(s.days).sort();
+    for (const k of keys.slice(0, Math.max(0, keys.length - 30))) delete s.days[k];
+    saveJson(STATS_KEY, s);
+  }
+  const emptyStats = () => ({ total: 0, today: 0, leaked: 0, savedTotal: 0, savedToday: 0, day: today(), days: {}, channels: {} });
+
+  function bump(s, channel, field, amount) {
+    const d = s.days[today()] || (s.days[today()] = { ads: 0, saved: 0 });
+    if (field !== 'leaked') d[field] = (d[field] || 0) + amount;
+    if (channel) {
+      const c = s.channels[channel] || (s.channels[channel] = { ads: 0, saved: 0, leaked: 0 });
+      c[field] = (c[field] || 0) + amount;
+    }
+  }
 
   function loadReports() {
     const r = loadJson(REPORTS_KEY, []);
     return Array.isArray(r) ? r : [];
   }
 
-  const box = Object.assign({ x: null, y: null, locked: false, expanded: false, sync: false, settingsOpen: false }, loadJson(BOX_KEY, {}));
+  const box = Object.assign({ x: null, y: null, locked: false, expanded: false, sync: false, settingsOpen: false, statsOpen: false }, loadJson(BOX_KEY, {}));
   const saveBox = () => saveJson(BOX_KEY, box);
 
   // Einstellungen (ältere Versionen hatten den Notfall-Modus in der Box gespeichert)
@@ -562,18 +660,28 @@
       modeBackup: 'Ersatz-Stream',
       modeStripped: 'herausgeschnitten',
       stamp: '⏱ Zeitstempel',
-      stampTitle: 'Kopiert einen Zeitstempel (Uhrzeit, Kanal, Methode) in die Zwischenablage – wird nicht gespeichert',
+      stampTitle: 'Kopiert einen Zeitstempel (Uhrzeit, Kanal, Methode) in die Zwischenablage – wird nicht gespeichert (Alt+Z)',
       leak: '⚠ Durchgerutscht',
-      leakTitle: 'Speichert die gerade gesehene Werbung im Durchgerutscht-Protokoll (+1)',
+      leakTitle: 'Speichert die gerade gesehene Werbung im Durchgerutscht-Protokoll (+1) (Alt+W)',
       syncOn: 'Sync AN: Ein Klick auf „Zeitstempel“ oder „Durchgerutscht“ löst beide aus – klicken zum Ausschalten',
       syncOff: 'Sync AUS: Buttons arbeiten einzeln – klicken, um beide zu koppeln',
       listTitle: (n) => 'Durchgerutscht – Protokoll (' + n + ')',
       noReports: 'Keine Meldungen.',
+      eventsTitle: 'Ereignisse',
+      noEvents: 'Noch keine Ereignisse.',
       auto: 'automatisch',
       manual: 'manuell',
       copyLog: '📋 Protokoll kopieren',
       clearLeaked: '🗑 Durchgerutscht leeren',
       resetAll: '↺ Zähler zurücksetzen',
+      reportBug: '🐞 Fehler melden',
+      reportBugTitle: 'Kopiert das Protokoll und öffnet das Fehler-Formular auf GitHub',
+      reportCopied: 'Protokoll kopiert – im GitHub-Formular unter „Protokoll“ mit Strg+V einfügen',
+      reportCopyFailed: 'Kopieren fehlgeschlagen – bitte im Dev-Modus „Protokoll kopieren“ nutzen',
+      checkUpdate: '🔄 Nach Updates suchen',
+      upToDate: '✓ Aktuell',
+      updateAvail: (v) => '⬆ Update ' + v + ' verfügbar – klicken zum Installieren',
+      updateOpened: 'Update-Seite geöffnet – in Tampermonkey auf „Aktualisieren“ klicken',
       sure: 'Sicher? Nochmal klicken',
       copied: '✓ Kopiert',
       failed: '✗ Fehler',
@@ -584,6 +692,7 @@
       lockOff: 'Verschiebbar – klicken zum Sperren',
       expand: 'Details, Melden & Einstellungen',
       collapse: 'Einklappen',
+      devTitle: '🛠 Dev-Modus aktiv – klicken zum Ausschalten',
       emergencyOnTitle: 'Notfall-Modus AN: Rutscht Werbung durch, wird sie stumm und unscharf geschaltet – klicken zum Ausschalten',
       emergencyOffTitle: 'Notfall-Modus AUS – klicken zum Einschalten',
       emergencyOnNotice: 'Notfall-Modus AN: durchgerutschte Werbung wird stumm & unscharf geschaltet',
@@ -595,14 +704,46 @@
       noticeBackup: 'Werbung erkannt – werbefreier Ersatz-Stream aktiv',
       noticeStripped: 'Werbung wird herausgeschnitten – Bild kann kurz stehen bleiben',
       noticeSaved: (d) => 'Werbepause vorbei – ' + d + ' gespart',
+      noticeRecover: 'Bild hängt – wird repariert …',
+      noticeReload: 'Bild hängt weiterhin – Seite wird neu geladen …',
+      whatsNew: (v, txt) => 'Aktualisiert auf ' + v + ' – Neu: ' + txt,
+      whatsNewLink: 'Was ist neu?',
+      version: (v) => 'Twitch Adblock v' + v,
+      statsBtn: '📊 Verlauf & Kanäle',
+      last7: 'Letzte 7 Tage (Werbepausen)',
+      topChannels: 'Kanäle mit der meisten Werbung',
+      noData: 'Noch keine Daten.',
+      chanLine: (c) => c.ads + ' Pausen · ' + fmtDur(c.saved) + (c.leaked ? ' · ' + c.leaked + ' durchgerutscht' : ''),
+      dayTitle: (d, ads, saved) => d + ': ' + ads + ' Werbepausen, ' + fmtDur(saved) + ' gespart',
       settings: '⚙ Einstellungen',
+      groupView: 'Anzeige',
+      groupBlock: 'Blocker',
+      groupExtra: 'Extras',
       setNotice: 'Hinweise einblenden',
       setCounter: 'Zahlen in der Box anzeigen',
       setCounterHint: 'Aus = nur das 🛡-Symbol',
+      setDev: '🛠 Dev-Modus',
+      setDevHint: 'Zeigt Werkzeuge zur Fehlersuche: Ereignisse, Protokoll, Zeitstempel, Zurücksetzen',
       setAuto: 'Durchgerutschte Werbung automatisch protokollieren',
       setEmergency: 'Notfall-Modus (stumm & unscharf)',
+      setRecover: 'Hängendes Bild automatisch reparieren',
+      setRecoverHint: 'Springt zum Live-Bild, startet den Player neu, notfalls Seite neu laden (max. alle 5 min)',
+      setVod: 'Werbung in Aufzeichnungen (VODs) filtern',
+      setVodHint: 'Experimentell – wirkt nach dem Neuladen der Seite',
+      setShortcuts: 'Tastenkürzel',
+      setShortcutsHint: 'Alt+W = Durchgerutscht, Alt+Z = Zeitstempel',
+      setUpdate: 'Täglich nach Updates suchen',
+      setHideTurbo: 'Turbo-Werbung ausblenden',
+      setHidePrime: 'Prime-Gaming-Banner ausblenden',
+      setStopFront: 'Video auf der Startseite stoppen',
       setLang: 'Sprache',
       langAuto: 'Automatisch (Browser)',
+      exportBtn: '💾 Sichern',
+      exportTitle: 'Zähler, Verlauf, Einstellungen und Protokoll als Datei speichern',
+      importBtn: '📂 Wiederherstellen',
+      importTitle: 'Eine zuvor gesicherte Datei laden',
+      imported: '✓ Wiederhergestellt',
+      importFailed: '✗ Ungültige Datei',
       stampParts: (date, ch, recent) => [
         'Werbung nicht blockiert', date, 'Kanal: ' + ch,
         recent ? 'letzte Methode: ' + recent.mode + ' (vor ' + recent.ago + ' s)' : 'vom Script keine Werbung erkannt',
@@ -617,16 +758,19 @@
       logLang: 'Sprache',
       logSettings: 'Einstellungen',
       logWorker: 'Video-Worker in diesem Tab verbunden',
+      logLatest: 'Neueste Version laut GitHub',
       yes: 'ja',
       no: 'nein',
       on: 'an',
       off: 'aus',
+      unknown: 'unbekannt',
       logEvents: 'Ereignisse (neueste zuerst)',
       logLeaks: 'Durchgerutscht',
       lastIssue: 'Letztes Problem',
       level: { info: 'INFO', warn: 'WARNUNG', error: 'FEHLER' },
       ev: {
         start: (d) => 'Script ' + d.version + ' gestartet',
+        updated: (d) => 'Aktualisiert von ' + d.from + ' auf ' + d.to,
         workerPatched: () => 'Video-Worker von Twitch übernommen',
         workerReady: () => 'Video-Worker verbunden – Stream-Werbung wird gefiltert',
         workerUnreadable: (d) => 'Video-Worker konnte nicht gelesen werden – Stream-Werbung wird NICHT gefiltert (' + d.message + ')',
@@ -645,12 +789,22 @@
         backupHasAds: (d) => 'Ersatz-Stream (' + d.playerType + ') hat ebenfalls Werbung',
         backupOk: (d) => 'Werbefreier Ersatz-Stream aktiv (' + d.playerType + ')',
         stripped: () => 'Kein werbefreier Ersatz-Stream – Werbung wird herausgeschnitten',
+        vodAd: () => 'Werbung in Aufzeichnung (VOD) herausgeschnitten',
         exception: (d) => 'Fehler im Script, Stream lädt ohne Filter weiter: ' + d.message,
         adBreak: (d) => 'Werbepause blockiert (' + modeText(d.mode) + (d.seconds ? ', ' + fmtDur(d.seconds) + ' gespart' : '') + ')',
         leakAuto: () => 'Werbung durchgerutscht (von Twitch angezeigt)',
         leakManual: () => 'Werbung durchgerutscht (manuell gemeldet)',
         videoError: (d) => 'Video-Fehler im Player (Code ' + d.code + ')' + (d.message ? ': ' + d.message : ''),
         playerError: (d) => 'Twitch-Player zeigt Fehler: ' + d.text,
+        freeze: (d) => 'Bild hängt seit ' + d.seconds + ' s',
+        recoverSeek: () => 'Reparatur 1: zum Live-Bild gesprungen',
+        recoverPlay: () => 'Reparatur 2: Player neu gestartet (Pause/Play)',
+        recoverReload: () => 'Reparatur 3: Seite wird neu geladen',
+        recoverSkipReload: () => 'Bild hängt weiter – Neuladen übersprungen (erst vor kurzem neu geladen)',
+        recovered: () => 'Bild läuft wieder',
+        updateAvailable: (d) => 'Update verfügbar: ' + d.version,
+        updateCheckFailed: (d) => 'Update-Prüfung fehlgeschlagen (' + d.message + ')',
+        imported: () => 'Sicherung wiederhergestellt',
       },
     },
     en: {
@@ -670,18 +824,28 @@
       modeBackup: 'replacement stream',
       modeStripped: 'cut out',
       stamp: '⏱ Timestamp',
-      stampTitle: 'Copies a timestamp (time, channel, method) to the clipboard – nothing is saved',
+      stampTitle: 'Copies a timestamp (time, channel, method) to the clipboard – nothing is saved (Alt+Z)',
       leak: '⚠ Slipped through',
-      leakTitle: 'Saves the ad you just saw to the slipped-through log (+1)',
+      leakTitle: 'Saves the ad you just saw to the slipped-through log (+1) (Alt+W)',
       syncOn: 'Sync ON: clicking "Timestamp" or "Slipped through" triggers both – click to turn off',
       syncOff: 'Sync OFF: buttons work independently – click to link them',
       listTitle: (n) => 'Slipped through – log (' + n + ')',
       noReports: 'No reports.',
+      eventsTitle: 'Events',
+      noEvents: 'No events yet.',
       auto: 'automatic',
       manual: 'manual',
       copyLog: '📋 Copy log',
       clearLeaked: '🗑 Clear slipped through',
       resetAll: '↺ Reset counters',
+      reportBug: '🐞 Report a problem',
+      reportBugTitle: 'Copies the log and opens the bug report form on GitHub',
+      reportCopied: 'Log copied – paste it with Ctrl+V into the "Log" field of the GitHub form',
+      reportCopyFailed: 'Copying failed – please use "Copy log" in dev mode',
+      checkUpdate: '🔄 Check for updates',
+      upToDate: '✓ Up to date',
+      updateAvail: (v) => '⬆ Update ' + v + ' available – click to install',
+      updateOpened: 'Update page opened – click "Update" in Tampermonkey',
       sure: 'Sure? Click again',
       copied: '✓ Copied',
       failed: '✗ Error',
@@ -692,6 +856,7 @@
       lockOff: 'Movable – click to lock',
       expand: 'Details, reporting & settings',
       collapse: 'Collapse',
+      devTitle: '🛠 Dev mode active – click to turn off',
       emergencyOnTitle: 'Emergency mode ON: ads that slip through are muted and blurred – click to turn off',
       emergencyOffTitle: 'Emergency mode OFF – click to turn on',
       emergencyOnNotice: 'Emergency mode ON: ads that slip through are muted & blurred',
@@ -703,14 +868,46 @@
       noticeBackup: 'Ad detected – ad-free replacement stream active',
       noticeStripped: 'Ad is being cut out – picture may freeze briefly',
       noticeSaved: (d) => 'Ad break over – ' + d + ' saved',
+      noticeRecover: 'Picture frozen – repairing …',
+      noticeReload: 'Picture still frozen – reloading the page …',
+      whatsNew: (v, txt) => 'Updated to ' + v + ' – new: ' + txt,
+      whatsNewLink: "What's new?",
+      version: (v) => 'Twitch Adblock v' + v,
+      statsBtn: '📊 History & channels',
+      last7: 'Last 7 days (ad breaks)',
+      topChannels: 'Channels with the most ads',
+      noData: 'No data yet.',
+      chanLine: (c) => c.ads + ' breaks · ' + fmtDur(c.saved) + (c.leaked ? ' · ' + c.leaked + ' slipped through' : ''),
+      dayTitle: (d, ads, saved) => d + ': ' + ads + ' ad breaks, ' + fmtDur(saved) + ' saved',
       settings: '⚙ Settings',
+      groupView: 'Display',
+      groupBlock: 'Blocker',
+      groupExtra: 'Extras',
       setNotice: 'Show notices',
       setCounter: 'Show numbers in the box',
       setCounterHint: 'Off = only the 🛡 icon',
+      setDev: '🛠 Dev mode',
+      setDevHint: 'Shows troubleshooting tools: events, log, timestamp, reset',
       setAuto: 'Log ads that slip through automatically',
       setEmergency: 'Emergency mode (mute & blur)',
+      setRecover: 'Repair frozen picture automatically',
+      setRecoverHint: 'Jumps to the live picture, restarts the player, reloads the page if needed (max. every 5 min)',
+      setVod: 'Filter ads in recordings (VODs)',
+      setVodHint: 'Experimental – takes effect after reloading the page',
+      setShortcuts: 'Keyboard shortcuts',
+      setShortcutsHint: 'Alt+W = slipped through, Alt+Z = timestamp',
+      setUpdate: 'Check for updates daily',
+      setHideTurbo: 'Hide Turbo ads',
+      setHidePrime: 'Hide Prime Gaming banners',
+      setStopFront: 'Stop the video on the front page',
       setLang: 'Language',
       langAuto: 'Automatic (browser)',
+      exportBtn: '💾 Back up',
+      exportTitle: 'Save counters, history, settings and log to a file',
+      importBtn: '📂 Restore',
+      importTitle: 'Load a previously saved file',
+      imported: '✓ Restored',
+      importFailed: '✗ Invalid file',
       stampParts: (date, ch, recent) => [
         'Ad not blocked', date, 'Channel: ' + ch,
         recent ? 'last method: ' + recent.mode + ' (' + recent.ago + ' s ago)' : 'no ad detected by the script',
@@ -725,16 +922,19 @@
       logLang: 'Language',
       logSettings: 'Settings',
       logWorker: 'Video worker connected in this tab',
+      logLatest: 'Latest version on GitHub',
       yes: 'yes',
       no: 'no',
       on: 'on',
       off: 'off',
+      unknown: 'unknown',
       logEvents: 'Events (newest first)',
       logLeaks: 'Slipped through',
       lastIssue: 'Last problem',
       level: { info: 'INFO', warn: 'WARNING', error: 'ERROR' },
       ev: {
         start: (d) => 'Script ' + d.version + ' started',
+        updated: (d) => 'Updated from ' + d.from + ' to ' + d.to,
         workerPatched: () => 'Took over Twitch video worker',
         workerReady: () => 'Video worker connected – stream ads are filtered',
         workerUnreadable: (d) => 'Could not read video worker – stream ads are NOT filtered (' + d.message + ')',
@@ -753,12 +953,22 @@
         backupHasAds: (d) => 'Replacement stream (' + d.playerType + ') has ads as well',
         backupOk: (d) => 'Ad-free replacement stream active (' + d.playerType + ')',
         stripped: () => 'No ad-free replacement stream – ads are being cut out',
+        vodAd: () => 'Ad in recording (VOD) cut out',
         exception: (d) => 'Script error, stream continues without filter: ' + d.message,
         adBreak: (d) => 'Ad break blocked (' + modeText(d.mode) + (d.seconds ? ', ' + fmtDur(d.seconds) + ' saved' : '') + ')',
         leakAuto: () => 'Ad slipped through (shown by Twitch)',
         leakManual: () => 'Ad slipped through (reported manually)',
         videoError: (d) => 'Video error in player (code ' + d.code + ')' + (d.message ? ': ' + d.message : ''),
         playerError: (d) => 'Twitch player shows error: ' + d.text,
+        freeze: (d) => 'Picture frozen for ' + d.seconds + ' s',
+        recoverSeek: () => 'Repair 1: jumped to the live picture',
+        recoverPlay: () => 'Repair 2: restarted the player (pause/play)',
+        recoverReload: () => 'Repair 3: reloading the page',
+        recoverSkipReload: () => 'Picture still frozen – reload skipped (reloaded only recently)',
+        recovered: () => 'Picture is running again',
+        updateAvailable: (d) => 'Update available: ' + d.version,
+        updateCheckFailed: (d) => 'Update check failed (' + d.message + ')',
+        imported: () => 'Backup restored',
       },
     },
   };
@@ -779,11 +989,25 @@
     return m % 60 ? h + ' h ' + (m % 60) + ' min' : h + ' h';
   }
 
-  const modeText = (mode) => (mode === 'backup' ? t('modeBackup') : mode === 'stripped' ? t('modeStripped') : '?');
+  function modeText(mode) {
+    return mode === 'backup' ? t('modeBackup') : mode === 'stripped' ? t('modeStripped') : '?';
+  }
+
+  // Versionen vergleichen: > 0, wenn a neuer ist als b
+  function cmpVersion(a, b) {
+    const pa = String(a).split('.').map(Number);
+    const pb = String(b).split('.').map(Number);
+    for (let i = 0; i < 3; i++) {
+      const d = (pa[i] || 0) - (pb[i] || 0);
+      if (d) return d;
+    }
+    return 0;
+  }
 
   let sessionCount = 0;
   let workerSeen = false; // hat sich der Video-Worker in diesem Tab gemeldet?
-  let lastAd = null; // { time, channel, mode } der letzten Werbepause in diesem Tab
+  let lastAd = null;      // { time, channel, mode } der letzten Werbepause in diesem Tab
+  let lastAdMsg = 0;      // Zeitpunkt der letzten Werbe-Meldung des Workers
   let notice = null;
   let noticeTimer = null;
   let ui = {};
@@ -797,15 +1021,62 @@
 
   function currentChannel() {
     const seg = location.pathname.split('/').filter(Boolean)[0] || '';
-    const reserved = ['directory', 'videos', 'settings', 'search', 'downloads', 'subscriptions', 'inventory', 'wallet', 'drops'];
+    const reserved = ['directory', 'videos', 'settings', 'search', 'downloads', 'subscriptions', 'inventory', 'wallet', 'drops', 'turbo', 'p', 'friends'];
     return seg && !reserved.includes(seg.toLowerCase()) ? seg.toLowerCase() : null;
   }
 
-  function fmtTime(iso) {
-    const d = new Date(iso);
+  function fmtTime(ms) {
+    const d = new Date(ms);
     return d.toLocaleDateString(t('locale'), { day: '2-digit', month: '2-digit' }) + ' '
       + d.toLocaleTimeString(t('locale'), { hour: '2-digit', minute: '2-digit' });
   }
+
+  function fmtTimeSec(ms) {
+    const d = new Date(ms);
+    return d.toLocaleDateString(t('locale'), { day: '2-digit', month: '2-digit' }) + ' '
+      + d.toLocaleTimeString(t('locale'), { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Ereignis-Protokoll (Fehler, Stream-Status, Werbepausen) – für die Fehlersuche
+  // ---------------------------------------------------------------------------
+  function loadEvents() {
+    const e = loadJson(EVENTS_KEY, []);
+    return Array.isArray(e) ? e : [];
+  }
+
+  function logEvent(level, code, data) {
+    try {
+      const events = loadEvents();
+      const entry = { t: Date.now(), level, code, data: data || {}, ch: currentChannel() };
+      const last = events[0];
+      // gleiches Ereignis kurz hintereinander nur hochzählen
+      if (last && last.code === code && last.level === level && last.ch === entry.ch
+          && JSON.stringify(last.data) === JSON.stringify(entry.data) && entry.t - last.t < 60 * 1000) {
+        last.n = (last.n || 1) + 1;
+        last.t = entry.t;
+      } else {
+        events.unshift(entry);
+      }
+      saveJson(EVENTS_KEY, events.slice(0, MAX_EVENTS));
+      if (ui.root && box.expanded && (level !== 'info' || settings.devMode)) renderCounter();
+    } catch (e) { /* Protokoll darf nie das Script stören */ }
+  }
+
+  function eventText(e) {
+    const fn = TEXT[lang()].ev[e.code];
+    let text;
+    try { text = fn ? fn(e.data || {}) : e.code; } catch (err) { text = e.code; }
+    return text + (e.n > 1 ? ' (×' + e.n + ')' : '');
+  }
+
+  function lastIssue() {
+    return loadEvents().find((e) => e.level !== 'info' && Date.now() - e.t < 24 * 3600 * 1000) || null;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Box: Position, Zustände
+  // ---------------------------------------------------------------------------
 
   // Box im sichtbaren Bereich halten (z. B. nach Verkleinern des Fensters oder Aufklappen)
   function placeCounter() {
@@ -826,21 +1097,13 @@
     if (!ui.root) return;
     ui.emergency.classList.toggle('on', !!settings.emergency);
     ui.emergency.title = settings.emergency ? t('emergencyOnTitle') : t('emergencyOffTitle');
-    ui.setEmergency.checked = !!settings.emergency;
+    if (ui.inputs && ui.inputs.emergency) ui.inputs.emergency.checked = !!settings.emergency;
   }
 
   function updateLock() {
     ui.root.classList.toggle('locked', !!box.locked);
     ui.lock.textContent = box.locked ? '🔒' : '🔓';
     ui.lock.title = box.locked ? t('lockOn') : t('lockOff');
-  }
-
-  function updateExpanded() {
-    ui.root.classList.toggle('expanded', !!box.expanded);
-    ui.toggle.textContent = box.expanded ? '▴' : '▾';
-    ui.toggle.title = box.expanded ? t('collapse') : t('expand');
-    ui.settingsWrap.classList.toggle('open', !!box.settingsOpen);
-    ui.settingsBtn.textContent = t('settings') + (box.settingsOpen ? ' ▴' : ' ▾');
   }
 
   function updateSync() {
@@ -905,6 +1168,7 @@
   }
 
   function flashButton(btn, text) {
+    if (!btn) return;
     if (btn.dataset.label === undefined) btn.dataset.label = btn.textContent;
     clearTimeout(btn._flashTimer);
     btn.textContent = text;
@@ -912,61 +1176,20 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Ereignis-Protokoll (Fehler, Stream-Status, Werbepausen) – für die Fehlersuche
+  // Protokoll-Text, Zeitstempel, Zwischenablage
   // ---------------------------------------------------------------------------
-  function loadEvents() {
-    const e = loadJson(EVENTS_KEY, []);
-    return Array.isArray(e) ? e : [];
-  }
-
-  function logEvent(level, code, data) {
-    try {
-      const events = loadEvents();
-      const entry = { t: Date.now(), level, code, data: data || {}, ch: currentChannel() };
-      const last = events[0];
-      // gleiches Ereignis kurz hintereinander nur hochzählen
-      if (last && last.code === code && last.level === level && last.ch === entry.ch
-          && JSON.stringify(last.data) === JSON.stringify(entry.data) && entry.t - last.t < 60 * 1000) {
-        last.n = (last.n || 1) + 1;
-        last.t = entry.t;
-      } else {
-        events.unshift(entry);
-      }
-      saveJson(EVENTS_KEY, events.slice(0, MAX_EVENTS));
-      if (level !== 'info' && ui.root && box.expanded) renderCounter();
-    } catch (e) { /* Protokoll darf nie das Script stören */ }
-  }
-
-  function eventText(e) {
-    const fn = TEXT[lang()].ev[e.code];
-    let text;
-    try { text = fn ? fn(e.data || {}) : e.code; } catch (err) { text = e.code; }
-    return text + (e.n > 1 ? ' (×' + e.n + ')' : '');
-  }
-
-  function fmtTimeSec(ms) {
-    const d = new Date(ms);
-    return d.toLocaleDateString(t('locale'), { day: '2-digit', month: '2-digit' }) + ' '
-      + d.toLocaleTimeString(t('locale'), { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  }
-
-  function lastIssue() {
-    return loadEvents().find((e) => e.level !== 'info' && Date.now() - e.t < 24 * 3600 * 1000) || null;
-  }
-
   function reportsAsText() {
     const s = loadStats();
     const onOff = (v) => (v ? t('on') : t('off'));
+    const upd = loadJson(UPDATE_KEY, {});
     const lines = [
       'Twitch Adblock ' + VERSION + ' – ' + t('logHeader'),
       t('logSummary')(s),
       'Browser: ' + navigator.userAgent,
       t('logPage') + ': ' + location.pathname + ' · ' + t('logLang') + ': ' + lang(),
-      t('logSettings') + ': ' + t('setNotice') + ' ' + onOff(settings.showNotice)
-        + ', ' + t('setCounter') + ' ' + onOff(settings.showCounter)
-        + ', ' + t('setAuto') + ' ' + onOff(settings.autoDetect)
-        + ', ' + t('setEmergency') + ' ' + onOff(settings.emergency),
+      t('logSettings') + ': ' + Object.keys(CONFIG.defaults).map((k) => k + '=' + (typeof settings[k] === 'boolean' ? onOff(settings[k]) : settings[k])).join(', '),
       t('logWorker') + ': ' + (workerSeen ? t('yes') : t('no')),
+      t('logLatest') + ': ' + (upd.latest || t('unknown')),
       '',
       '== ' + t('logEvents') + ' ==',
     ];
@@ -976,7 +1199,7 @@
     }
     lines.push('', '== ' + t('logLeaks') + ' ==');
     for (const r of loadReports()) {
-      lines.push(fmtTime(r.time) + ' | ' + (r.channel || '?') + ' | '
+      lines.push(fmtTime(new Date(r.time).getTime()) + ' | ' + (r.channel || '?') + ' | '
         + (r.auto ? t('logAuto') : t('logManual'))
         + ' | ' + t('logMethod') + ': ' + (r.mode ? modeText(r.mode) : t('logNoAd')));
     }
@@ -984,7 +1207,7 @@
   }
 
   // Text für eine manuelle Meldung, z. B.
-  // "Werbung nicht blockiert – 17.10.2026 16:23:05 – Kanal: xyz – letzte Methode: Ersatz-Stream (vor 40 s) – Script 1.8.0"
+  // "Werbung nicht blockiert – 17.10.2026 16:23:05 – Kanal: xyz – letzte Methode: Ersatz-Stream (vor 40 s) – Script 2.0.0"
   function reportStamp() {
     const now = new Date();
     const recent = lastAd && Date.now() - lastAd.time < 5 * 60 * 1000 ? lastAd : null;
@@ -1012,6 +1235,102 @@
     return ok;
   }
 
+  // Zeitstempel: nur in die Zwischenablage, nichts speichern
+  async function doStamp() {
+    const ok = await copyText(reportStamp());
+    flashButton(ui.stamp, ok ? t('copied') : t('failed'));
+    if (!ui.root || !box.expanded || !settings.devMode) showNotice(ok ? reportStamp() : t('failed'), 4000);
+  }
+  // Durchgerutscht: im Protokoll speichern und Zähler +1
+  function doLeak() {
+    addReport(false);
+    flashButton(ui.leak, t('saved'));
+    if (!ui.root || !box.expanded) showNotice(t('leak') + ' – ' + t('saved'), 3000);
+  }
+  // Ist Sync an, löst jeder der beiden Buttons auch den anderen aus
+  const pressStamp = () => { doStamp(); if (box.sync) doLeak(); };
+  const pressLeak = () => { doLeak(); if (box.sync) doStamp(); };
+
+  // Protokoll kopieren und Fehler-Formular auf GitHub öffnen
+  async function reportBug() {
+    const ok = await copyText(reportsAsText());
+    window.open(ISSUE_URL, '_blank', 'noopener');
+    showNotice(ok ? t('reportCopied') : t('reportCopyFailed'), 12000, true);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Updates und „Was ist neu“
+  // ---------------------------------------------------------------------------
+  function updateInfo() {
+    const u = loadJson(UPDATE_KEY, {});
+    return u.latest && cmpVersion(u.latest, VERSION) > 0 ? u.latest : null;
+  }
+
+  async function checkUpdate() {
+    try {
+      const r = await fetch(RAW_URL + '?t=' + Date.now(), { cache: 'no-store' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const v = ((await r.text()).match(/@version\s+([\d.]+)/) || [])[1];
+      if (!v) throw new Error('no @version');
+      const before = updateInfo();
+      saveJson(UPDATE_KEY, { checked: Date.now(), latest: v });
+      if (cmpVersion(v, VERSION) > 0 && before !== v) logEvent('info', 'updateAvailable', { version: v });
+      renderCounter();
+      return v;
+    } catch (e) {
+      saveJson(UPDATE_KEY, Object.assign(loadJson(UPDATE_KEY, {}), { checked: Date.now() }));
+      logEvent('warn', 'updateCheckFailed', { message: String((e && e.message) || e) });
+      return null;
+    }
+  }
+
+  function openUpdate() {
+    window.open(RAW_URL, '_blank', 'noopener');
+    showNotice(t('updateOpened'), 8000, true);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Sichern / Wiederherstellen
+  // ---------------------------------------------------------------------------
+  function exportData() {
+    const data = {
+      app: 'twitch-adblock', version: VERSION, exported: new Date().toISOString(),
+      stats: loadStats(), settings, reports: loadReports(), box, events: loadEvents(),
+    };
+    const a = el('a');
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+    a.download = 'twitch-adblock-backup-' + today() + '.json';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  }
+
+  function importData(file, btn) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result);
+        if (!data || data.app !== 'twitch-adblock' || !data.stats) throw new Error('invalid');
+        saveJson(STATS_KEY, data.stats);
+        if (data.settings) saveJson(SETTINGS_KEY, data.settings);
+        if (Array.isArray(data.reports)) saveJson(REPORTS_KEY, data.reports);
+        if (Array.isArray(data.events)) saveJson(EVENTS_KEY, data.events);
+        if (data.box) { Object.assign(box, data.box); saveBox(); }
+        settings = loadSettings();
+        applyPageOptions();
+        logEvent('info', 'imported', {});
+        rebuildCounter();
+        flashButton(ui.importBtn, t('imported'));
+      } catch (e) {
+        flashButton(btn, t('importFailed'));
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Panel aufbauen
+  // ---------------------------------------------------------------------------
   function setEmergency(on) {
     settings.emergency = !!on;
     saveSettings();
@@ -1020,38 +1339,38 @@
     showNotice(settings.emergency ? t('emergencyOnNotice') : t('emergencyOffNotice'), 3000);
   }
 
-  // Einstellungs-Bereich im Panel
+  function setSetting(key, value) {
+    settings[key] = value;
+    saveSettings();
+    if (key === 'emergency') { updateEmergency(); if (!value) emergencyOff(); }
+    if (key === 'showNotice' && !value) showNotice(null, 0, true);
+    if (key === 'hideTurbo' || key === 'hidePrime') applyPageOptions();
+    if (key === 'updateCheck' && value) checkUpdate();
+    renderCounter();
+  }
+
   function buildSettings() {
-    ui.settingsBtn = el('button', 'ttv-ab-settings-btn');
-    ui.settingsWrap = el('div', 'ttv-ab-settings');
-    const check = (label, hint, value, onChange) => {
+    ui.settingsBtn = el('button', 'ttv-ab-wide');
+    ui.settingsWrap = el('div', 'ttv-ab-fold');
+    ui.inputs = {};
+    const group = (title) => ui.settingsWrap.append(el('h4', '', title));
+    const check = (key, label, hint) => {
       const row = el('label', 'ttv-ab-setting');
       const input = el('input');
       input.type = 'checkbox';
-      input.checked = !!value;
-      input.addEventListener('change', () => onChange(input.checked));
+      input.checked = !!settings[key];
+      input.addEventListener('change', () => (key === 'emergency' ? setEmergency(input.checked) : setSetting(key, input.checked)));
       const txt = el('span', '', label);
       if (hint) txt.append(el('small', '', hint));
       row.append(input, txt);
       ui.settingsWrap.append(row);
-      return input;
+      ui.inputs[key] = input;
     };
-    check(t('setNotice'), null, settings.showNotice, (v) => {
-      settings.showNotice = v;
-      saveSettings();
-      if (!v) showNotice(null, 0, true);
-    });
-    check(t('setCounter'), t('setCounterHint'), settings.showCounter, (v) => {
-      settings.showCounter = v;
-      saveSettings();
-      renderCounter();
-    });
-    check(t('setAuto'), null, settings.autoDetect, (v) => {
-      settings.autoDetect = v;
-      saveSettings();
-    });
-    ui.setEmergency = check(t('setEmergency'), null, settings.emergency, (v) => setEmergency(v));
 
+    group(t('groupView'));
+    check('showNotice', t('setNotice'));
+    check('showCounter', t('setCounter'), t('setCounterHint'));
+    check('devMode', t('setDev'), t('setDevHint'));
     const langRow = el('label', 'ttv-ab-setting ttv-ab-lang');
     const select = el('select');
     for (const [val, label] of [['auto', t('langAuto')], ['de', 'Deutsch'], ['en', 'English']]) {
@@ -1068,6 +1387,35 @@
     langRow.append(el('span', '', t('setLang')), select);
     ui.settingsWrap.append(langRow);
 
+    group(t('groupBlock'));
+    check('emergency', t('setEmergency'));
+    check('autoDetect', t('setAuto'));
+    check('autoRecover', t('setRecover'), t('setRecoverHint'));
+    check('vod', t('setVod'), t('setVodHint'));
+
+    group(t('groupExtra'));
+    check('shortcuts', t('setShortcuts'), t('setShortcutsHint'));
+    check('updateCheck', t('setUpdate'));
+    check('hideTurbo', t('setHideTurbo'));
+    check('hidePrime', t('setHidePrime'));
+    check('stopFrontpage', t('setStopFront'));
+
+    // Sichern / Wiederherstellen
+    const backup = el('div', 'ttv-ab-actions');
+    const exportBtn = el('button', '', t('exportBtn'));
+    exportBtn.title = t('exportTitle');
+    exportBtn.addEventListener('click', exportData);
+    ui.importBtn = el('button', '', t('importBtn'));
+    ui.importBtn.title = t('importTitle');
+    const file = el('input');
+    file.type = 'file';
+    file.accept = 'application/json,.json';
+    file.style.display = 'none';
+    file.addEventListener('change', () => { if (file.files[0]) importData(file.files[0], ui.importBtn); file.value = ''; });
+    ui.importBtn.addEventListener('click', () => file.click());
+    backup.append(exportBtn, ui.importBtn, file);
+    ui.settingsWrap.append(backup);
+
     ui.settingsBtn.addEventListener('click', () => {
       box.settingsOpen = !box.settingsOpen;
       saveBox();
@@ -1075,17 +1423,67 @@
     });
   }
 
+  function buildStats() {
+    ui.statsBtn = el('button', 'ttv-ab-wide');
+    ui.statsWrap = el('div', 'ttv-ab-fold');
+    ui.statsWrap.append(el('h4', '', t('last7')));
+    ui.chart = el('div', 'ttv-ab-chart');
+    ui.statsWrap.append(ui.chart);
+    ui.statsWrap.append(el('h4', '', t('topChannels')));
+    ui.channels = el('ul');
+    ui.statsWrap.append(ui.channels);
+    ui.statsBtn.addEventListener('click', () => {
+      box.statsOpen = !box.statsOpen;
+      saveBox();
+      renderCounter();
+    });
+  }
+
+  function renderStats(s) {
+    // 7-Tage-Balken
+    ui.chart.replaceChildren();
+    const days = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      days.push({ key: dayKey(d), date: d });
+    }
+    const max = Math.max(1, ...days.map((d) => (s.days[d.key] || {}).ads || 0));
+    for (const d of days) {
+      const v = s.days[d.key] || { ads: 0, saved: 0 };
+      const col = el('div', 'ttv-ab-bar');
+      const label = d.date.toLocaleDateString(t('locale'), { weekday: 'short' });
+      col.title = t('dayTitle')(d.date.toLocaleDateString(t('locale')), v.ads || 0, v.saved || 0);
+      const fill = el('i');
+      fill.style.height = Math.round(((v.ads || 0) / max) * 100) + '%';
+      col.append(el('b', '', String(v.ads || 0)), el('span', 'ttv-ab-barbox'), el('small', '', label));
+      col.children[1].append(fill);
+      ui.chart.append(col);
+    }
+    // Top-Kanäle
+    ui.channels.replaceChildren();
+    const top = Object.entries(s.channels).sort((a, b) => (b[1].ads || 0) - (a[1].ads || 0)).slice(0, 5);
+    if (!top.length) ui.channels.append(el('li', 'ttv-ab-muted', t('noData')));
+    for (const [name, c] of top) {
+      const li = el('li');
+      li.append(el('b', '', name), el('span', 'ttv-ab-muted', ' · ' + t('chanLine')(c)));
+      ui.channels.append(li);
+    }
+  }
+
   function buildCounter() {
     ui.root = el('div');
     ui.root.id = 'ttv-adblock-counter';
 
-    // Kopfzeile: Zähler, Notfall-Modus, Auf-/Zuklappen, Schloss
+    // Kopfzeile: Zähler, Update, Dev, Notfall-Modus, Auf-/Zuklappen, Schloss
     ui.head = el('div', 'ttv-ab-head');
     ui.text = el('span');
+    ui.update = el('button', 'ttv-ab-icon ttv-ab-update', '⬆');
+    ui.dev = el('button', 'ttv-ab-icon ttv-ab-devbtn', '🛠');
     ui.emergency = el('button', 'ttv-ab-icon ttv-ab-emergency', '🛟');
     ui.toggle = el('button', 'ttv-ab-icon');
     ui.lock = el('button', 'ttv-ab-icon');
-    ui.head.append(ui.text, ui.emergency, ui.toggle, ui.lock);
+    ui.head.append(ui.text, ui.update, ui.dev, ui.emergency, ui.toggle, ui.lock);
     ui.head.addEventListener('dblclick', (e) => {
       if (e.target.closest('button')) return;
       box.expanded = !box.expanded;
@@ -1093,43 +1491,72 @@
       renderCounter();
     });
 
-    // Ausklappbares Panel
+    // Panel
     ui.panel = el('div', 'ttv-ab-panel');
     const stats = el('div', 'ttv-ab-stats');
-    const row = (label, cls) => {
-      const v = el('b', cls || '', '0');
-      stats.append(el('span', '', label), v);
+    const row = (label, cls, dev) => {
+      const k = el('span', dev ? 'ttv-ab-dev' : '', label);
+      const v = el('b', (cls || '') + (dev ? ' ttv-ab-dev' : ''), '0');
+      stats.append(k, v);
       return v;
     };
-    ui.vTab = row(t('statTab'));
+    ui.vTab = row(t('statTab'), '', true);
     ui.vToday = row(t('statToday'));
     ui.vTotal = row(t('statTotal'));
     ui.vSavedToday = row(t('statSavedToday'), 'good');
     ui.vSavedTotal = row(t('statSavedTotal'), 'good');
     ui.vLeaked = row(t('statLeaked'), 'bad');
-    ui.last = el('div', 'ttv-ab-muted');
-    ui.issue = el('div', 'ttv-ab-issue');
-    // Melde-Zeile: [Zeitstempel] [Durchgerutscht] [Sync]
+    ui.last = el('div', 'ttv-ab-muted ttv-ab-dev');
+    ui.issue = el('div', 'ttv-ab-issue ttv-ab-dev');
+
+    // Melde-Zeile: [Zeitstempel] [Durchgerutscht] [Sync] – Zeitstempel & Sync nur im Dev-Modus
     ui.reportRow = el('div', 'ttv-ab-reportrow');
-    ui.stamp = el('button', 'ttv-ab-stamp', t('stamp'));
+    ui.stamp = el('button', 'ttv-ab-stamp ttv-ab-dev', t('stamp'));
     ui.stamp.title = t('stampTitle');
     ui.leak = el('button', 'ttv-ab-leak', t('leak'));
     ui.leak.title = t('leakTitle');
-    ui.sync = el('button', 'ttv-ab-sync', '🔗');
+    ui.sync = el('button', 'ttv-ab-sync ttv-ab-dev', '🔗');
     ui.reportRow.append(ui.stamp, ui.leak, ui.sync);
+
+    buildStats();
+
+    // Dev-Bereich: Durchgerutscht-Liste, Ereignisse, Werkzeuge
+    ui.devWrap = el('div', 'ttv-ab-dev');
     ui.listTitle = el('h4');
     ui.list = el('ul');
-    const actions = el('div', 'ttv-ab-actions');
+    ui.eventsTitle = el('h4', '', t('eventsTitle'));
+    ui.events = el('ul', 'ttv-ab-events');
+    const devActions = el('div', 'ttv-ab-actions');
     ui.copy = el('button', '', t('copyLog'));
     ui.clear = el('button', '', t('clearLeaked'));
     ui.reset = el('button', '', t('resetAll'));
-    actions.append(ui.copy, ui.clear, ui.reset);
-    buildSettings();
-    ui.panel.append(stats, ui.last, ui.issue, ui.reportRow, ui.listTitle, ui.list, actions, ui.settingsBtn, ui.settingsWrap);
+    devActions.append(ui.copy, ui.clear, ui.reset);
+    ui.devWrap.append(ui.listTitle, ui.list, ui.eventsTitle, ui.events, devActions);
 
+    // Immer sichtbar: Fehler melden, Updates
+    const mainActions = el('div', 'ttv-ab-actions');
+    ui.reportBug = el('button', '', t('reportBug'));
+    ui.reportBug.title = t('reportBugTitle');
+    ui.checkUpdate = el('button', '', t('checkUpdate'));
+    mainActions.append(ui.reportBug, ui.checkUpdate);
+
+    buildSettings();
+
+    // Fußzeile mit Version
+    ui.footer = el('div', 'ttv-ab-footer');
+    ui.versionText = el('span', '', t('version')(VERSION));
+    const news = el('a', '', t('whatsNewLink'));
+    news.href = CHANGELOG_URL;
+    news.target = '_blank';
+    news.rel = 'noopener';
+    ui.footer.append(ui.versionText, document.createTextNode(' · '), news);
+
+    ui.panel.append(stats, ui.last, ui.issue, ui.reportRow, ui.statsBtn, ui.statsWrap, ui.devWrap,
+      mainActions, ui.settingsBtn, ui.settingsWrap, ui.footer);
     ui.root.append(ui.head, ui.panel);
     document.body.appendChild(ui.root);
 
+    // Ereignisse
     ui.toggle.addEventListener('click', () => {
       box.expanded = !box.expanded;
       saveBox();
@@ -1142,19 +1569,13 @@
       renderCounter();
     });
     ui.emergency.addEventListener('click', () => setEmergency(!settings.emergency));
-    // Zeitstempel: nur in die Zwischenablage, nichts speichern
-    async function doStamp() {
-      const ok = await copyText(reportStamp());
-      flashButton(ui.stamp, ok ? t('copied') : t('failed'));
-    }
-    // Durchgerutscht: im Protokoll speichern und Zähler +1
-    function doLeak() {
-      addReport(false);
-      flashButton(ui.leak, t('saved'));
-    }
-    // Ist Sync an, löst jeder der beiden Buttons auch den anderen aus
-    ui.stamp.addEventListener('click', () => { doStamp(); if (box.sync) doLeak(); });
-    ui.leak.addEventListener('click', () => { doLeak(); if (box.sync) doStamp(); });
+    ui.dev.addEventListener('click', () => {
+      setSetting('devMode', false);
+      if (ui.inputs.devMode) ui.inputs.devMode.checked = false;
+    });
+    ui.update.addEventListener('click', openUpdate);
+    ui.stamp.addEventListener('click', pressStamp);
+    ui.leak.addEventListener('click', pressLeak);
     ui.sync.addEventListener('click', () => {
       box.sync = !box.sync;
       saveBox();
@@ -1165,25 +1586,33 @@
       a.addEventListener('mouseenter', () => { if (box.sync) b.classList.add('pair-hover'); });
       a.addEventListener('mouseleave', () => b.classList.remove('pair-hover'));
     }
-    updateSync();
     ui.copy.addEventListener('click', async () => {
       flashButton(ui.copy, (await copyText(reportsAsText())) ? t('copied') : t('failed'));
+    });
+    ui.reportBug.addEventListener('click', reportBug);
+    ui.checkUpdate.addEventListener('click', async () => {
+      const v = await checkUpdate();
+      if (v === null) openUpdate(); // Prüfung blockiert? Dann direkt die Update-Seite öffnen
+      else if (cmpVersion(v, VERSION) > 0) flashButton(ui.checkUpdate, t('updateAvail')(v).split(' – ')[0]);
+      else flashButton(ui.checkUpdate, t('upToDate') + ' (' + VERSION + ')');
     });
     confirmClick(ui.clear, () => {
       saveJson(REPORTS_KEY, []);
       const s = loadStats();
       s.leaked = 0;
+      for (const c of Object.values(s.channels)) c.leaked = 0;
       saveStats(s);
       renderCounter();
       flashButton(ui.clear, t('cleared'));
     });
     confirmClick(ui.reset, () => {
-      saveStats({ total: 0, today: 0, leaked: 0, savedTotal: 0, savedToday: 0, day: today() });
+      saveStats(emptyStats());
       sessionCount = 0;
       renderCounter();
       flashButton(ui.reset, t('resetDone'));
     });
 
+    updateSync();
     updateLock();
     updateEmergency();
     makeDraggable();
@@ -1200,11 +1629,25 @@
     if (!document.body) return;
     if (!ui.root) buildCounter();
     const s = loadStats();
+    const upd = settings.updateCheck ? updateInfo() : null;
+
     ui.text.textContent = !settings.showCounter
       ? '🛡'
       : s.savedTotal > 0 ? t('headSaved')(s.total, fmtDur(s.savedTotal)) : t('head')(s.total);
-    ui.head.title = box.locked ? t('headLocked') : t('headDrag');
-    updateExpanded();
+    ui.head.title = t('version')(VERSION) + '\n' + (box.locked ? t('headLocked') : t('headDrag'));
+    ui.root.classList.toggle('expanded', !!box.expanded);
+    ui.root.classList.toggle('dev', !!settings.devMode);
+    ui.toggle.textContent = box.expanded ? '▴' : '▾';
+    ui.toggle.title = box.expanded ? t('collapse') : t('expand');
+    ui.update.hidden = !upd;
+    if (upd) ui.update.title = t('updateAvail')(upd);
+    ui.dev.hidden = !settings.devMode;
+    ui.dev.title = t('devTitle');
+    ui.settingsWrap.classList.toggle('open', !!box.settingsOpen);
+    ui.settingsBtn.textContent = t('settings') + (box.settingsOpen ? ' ▴' : ' ▾');
+    ui.statsWrap.classList.toggle('open', !!box.statsOpen);
+    ui.statsBtn.textContent = t('statsBtn') + (box.statsOpen ? ' ▴' : ' ▾');
+    for (const [k, input] of Object.entries(ui.inputs)) input.checked = !!settings[k];
 
     if (box.expanded) {
       ui.vTab.textContent = String(sessionCount);
@@ -1217,22 +1660,31 @@
         ? t('lastAd')(fmtTime(lastAd.time), lastAd.channel, modeText(lastAd.mode))
         : t('noAdYet');
       const issue = lastIssue();
-      ui.issue.textContent = issue
-        ? '⚠ ' + t('lastIssue') + ' (' + fmtTime(issue.t) + '): ' + eventText(issue)
-        : '';
+      ui.issue.textContent = issue ? '⚠ ' + t('lastIssue') + ' (' + fmtTime(issue.t) + '): ' + eventText(issue) : '';
       ui.issue.classList.toggle('error', !!issue && issue.level === 'error');
+      ui.versionText.textContent = t('version')(VERSION) + (upd ? ' → ' + upd : '');
 
-      const reports = loadReports();
-      ui.list.replaceChildren();
-      if (!reports.length) {
-        ui.list.append(el('li', 'ttv-ab-muted', t('noReports')));
-      } else {
+      if (box.statsOpen) renderStats(s);
+
+      if (settings.devMode) {
+        const reports = loadReports();
+        ui.list.replaceChildren();
+        if (!reports.length) ui.list.append(el('li', 'ttv-ab-muted', t('noReports')));
         for (const r of reports.slice(0, 20)) {
-          ui.list.append(el('li', '', fmtTime(r.time) + ' · ' + (r.channel || '?')
+          ui.list.append(el('li', '', fmtTime(new Date(r.time).getTime()) + ' · ' + (r.channel || '?')
             + (r.mode ? ' · ' + modeText(r.mode) : '') + ' · ' + (r.auto ? t('auto') : t('manual'))));
         }
+        ui.listTitle.textContent = t('listTitle')(reports.length);
+
+        const events = loadEvents().slice(0, 15);
+        ui.events.replaceChildren();
+        if (!events.length) ui.events.append(el('li', 'ttv-ab-muted', t('noEvents')));
+        for (const e of events) {
+          const li = el('li', 'lvl-' + e.level);
+          li.append(el('span', 'ttv-ab-muted', fmtTimeSec(e.t).split(' ')[1] + ' '), document.createTextNode((e.ch ? e.ch + ': ' : '') + eventText(e)));
+          ui.events.append(li);
+        }
       }
-      ui.listTitle.textContent = t('listTitle')(reports.length);
     }
     placeCounter();
   }
@@ -1241,6 +1693,7 @@
     const s = loadStats();
     s.total++;
     s.today++;
+    bump(s, lastAd && lastAd.channel, 'ads', 1);
     saveStats(s);
     sessionCount++;
     renderCounter();
@@ -1251,6 +1704,7 @@
     const s = loadStats();
     s.savedTotal += seconds;
     s.savedToday += seconds;
+    bump(s, lastAd && lastAd.channel, 'saved', seconds);
     saveStats(s);
     renderCounter();
   }
@@ -1258,40 +1712,59 @@
   // Durchgerutschte Werbung speichern (manuell oder automatisch erkannt)
   function addReport(auto) {
     const recent = lastAd && Date.now() - lastAd.time < 3 * 60 * 1000 ? lastAd : null;
+    const channel = currentChannel() || (recent && recent.channel) || null;
     const reports = loadReports();
-    reports.unshift({
-      time: new Date().toISOString(),
-      channel: currentChannel() || (recent && recent.channel) || null,
-      auto: !!auto,
-      mode: recent ? recent.mode : null,
-      version: VERSION,
-    });
+    reports.unshift({ time: new Date().toISOString(), channel, auto: !!auto, mode: recent ? recent.mode : null, version: VERSION });
     saveJson(REPORTS_KEY, reports.slice(0, MAX_REPORTS));
     const s = loadStats();
     s.leaked++;
+    bump(s, channel, 'leaked', 1);
     saveStats(s);
     logEvent('warn', auto ? 'leakAuto' : 'leakManual', {});
     renderCounter();
   }
 
+  // ---------------------------------------------------------------------------
+  // Seiten-Optionen: Turbo/Prime ausblenden
+  // ---------------------------------------------------------------------------
+  function applyPageOptions() {
+    const root = document.documentElement;
+    if (!root) return;
+    root.classList.toggle('ttv-ab-hide-turbo', !!settings.hideTurbo);
+    root.classList.toggle('ttv-ab-hide-prime', !!settings.hidePrime);
+  }
+  applyPageOptions();
+
   if (document.body) renderCounter();
   else document.addEventListener('DOMContentLoaded', renderCounter, { once: true });
   // Box aktualisieren, wenn ein anderer Twitch-Tab gezählt, gemeldet oder umgestellt hat
   window.addEventListener('storage', (e) => {
-    if (e.key === STATS_KEY || e.key === REPORTS_KEY) renderCounter();
+    if (e.key === STATS_KEY || e.key === REPORTS_KEY || e.key === UPDATE_KEY) renderCounter();
     if (e.key === SETTINGS_KEY) {
       settings = loadSettings();
       if (!settings.emergency) emergencyOff();
+      applyPageOptions();
       rebuildCounter();
     }
   });
 
-  // Erkennung durchgerutschter Werbung: Zeigt Twitch seine eigene Werbe-Anzeige
-  // (Label/Countdown), hat der Player Werbung erkannt, die nicht entfernt wurde.
+  // Tastenkürzel: Alt+W = Durchgerutscht, Alt+Z = Zeitstempel (nicht beim Tippen im Chat)
+  window.addEventListener('keydown', (e) => {
+    if (!settings.shortcuts || !e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    const tgt = e.target;
+    if (tgt && (tgt.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(tgt.tagName))) return;
+    const key = (e.key || '').toLowerCase();
+    if (key === 'w') { e.preventDefault(); pressLeak(); }
+    else if (key === 'z') { e.preventDefault(); pressStamp(); }
+  }, true);
+
+  // ---------------------------------------------------------------------------
+  // Durchgerutschte Werbung erkennen + Notfall-Modus
+  // ---------------------------------------------------------------------------
+  // Zeigt Twitch seine eigene Werbe-Anzeige (Label/Countdown), hat der Player
+  // Werbung erkannt, die nicht entfernt wurde.
   const AD_UI_SELECTOR = '[data-a-target="video-ad-label"], [data-a-target="video-ad-countdown"]';
   let lastLeak = 0;
-
-  // Notfall-Modus: durchgerutschte Werbung stumm und unscharf schalten
   const emergency = { active: false, videos: new Map() }; // video -> war vorher stumm?
 
   function emergencyOn() {
@@ -1334,12 +1807,61 @@
       : t('leakEmergency'), 6000);
   }, 500);
 
-  // Überwachung für das Protokoll: Video-Fehler, Fehlermeldungen des Players,
-  // und ob sich der Video-Worker überhaupt meldet
+  // ---------------------------------------------------------------------------
+  // Überwachung: Video-/Player-Fehler, Video-Worker, hängendes Bild, Startseite
+  // ---------------------------------------------------------------------------
   const watchedVideos = new WeakSet();
   const pageStart = Date.now();
   let noWorkerLogged = false;
   let lastPlayerError = '';
+  const freeze = { video: null, time: -1, since: Date.now(), step: 0 };
+
+  function mainVideo() {
+    return document.querySelector('[data-a-target="video-player"] video') || document.querySelector('video');
+  }
+
+  // Hängendes Bild reparieren: 1. zum Live-Bild springen, 2. Pause/Play, 3. Seite neu laden
+  function checkFreeze() {
+    const v = mainVideo();
+    const adRunning = Date.now() - lastAdMsg < 15 * 1000; // beim Herausschneiden steht das Bild absichtlich
+    if (!settings.autoRecover || !v || !currentChannel() || v.paused || v.ended || document.hidden
+        || adRunning || emergency.active || v.readyState === 0) {
+      freeze.video = v; freeze.time = v ? v.currentTime : -1; freeze.since = Date.now(); freeze.step = 0;
+      return;
+    }
+    if (v !== freeze.video || v.currentTime !== freeze.time) {
+      if (freeze.step > 0 && v === freeze.video) logEvent('info', 'recovered', {});
+      freeze.video = v; freeze.time = v.currentTime; freeze.since = Date.now(); freeze.step = 0;
+      return;
+    }
+    const stuck = Date.now() - freeze.since;
+    if (freeze.step === 0 && stuck > 10 * 1000) {
+      logEvent('warn', 'freeze', { seconds: Math.round(stuck / 1000) });
+      showNotice(t('noticeRecover'), 4000);
+      if (v.buffered.length) {
+        const end = v.buffered.end(v.buffered.length - 1);
+        if (end - v.currentTime > 1) v.currentTime = end - 0.5;
+      }
+      logEvent('info', 'recoverSeek', {});
+      freeze.step = 1; freeze.since = Date.now();
+    } else if (freeze.step === 1 && stuck > 8 * 1000) {
+      v.pause();
+      setTimeout(() => { const p = v.play(); if (p && p.catch) p.catch(() => {}); }, 300);
+      logEvent('info', 'recoverPlay', {});
+      freeze.step = 2; freeze.since = Date.now();
+    } else if (freeze.step === 2 && stuck > 12 * 1000) {
+      freeze.step = 3;
+      if (Date.now() - loadJson(RELOAD_KEY, 0) > 5 * 60 * 1000) {
+        saveJson(RELOAD_KEY, Date.now());
+        logEvent('warn', 'recoverReload', {});
+        showNotice(t('noticeReload'), 3000, true);
+        setTimeout(() => location.reload(), 1500);
+      } else {
+        logEvent('warn', 'recoverSkipReload', {});
+      }
+    }
+  }
+
   setInterval(() => {
     if (!document.body) return;
     for (const v of document.querySelectorAll('video')) {
@@ -1362,6 +1884,13 @@
       noWorkerLogged = true;
       logEvent('warn', 'noWorker', {});
     }
+    // Startseite: automatisch startendes Video stoppen
+    if (settings.stopFrontpage && location.pathname === '/') {
+      for (const v of document.querySelectorAll('video')) {
+        if (!v.paused) { v.muted = true; v.pause(); }
+      }
+    }
+    checkFreeze();
   }, 2000);
 
   // ---------------------------------------------------------------------------
@@ -1400,6 +1929,9 @@
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Meldungen aus dem Video-Worker
+  // ---------------------------------------------------------------------------
   if (typeof BroadcastChannel !== 'undefined') {
     const bc = new BroadcastChannel(CONFIG.channelName);
     bc.onmessage = (e) => {
@@ -1410,15 +1942,18 @@
         if (code === 'workerReady') workerSeen = true;
         logEvent(level, code, data);
       } else if (msg.type === 'ad-start') {
+        lastAdMsg = Date.now();
         lastAd = { time: Date.now(), channel: currentChannel(), mode: null };
         countAdBreak();
       } else if (msg.type === 'ad') {
+        lastAdMsg = Date.now();
         lastAd = lastAd || { time: Date.now() };
         lastAd.mode = msg.mode;
         if (msg.channel) lastAd.channel = msg.channel;
         showNotice(msg.mode === 'backup' ? t('noticeBackup') : t('noticeStripped'));
         if (box.expanded) renderCounter();
       } else if (msg.type === 'ad-end') {
+        lastAdMsg = 0;
         logEvent('info', 'adBreak', { mode: lastAd ? lastAd.mode : null, seconds: msg.seconds || 0 });
         addSavedTime(msg.seconds);
         if (msg.seconds > 0) showNotice(t('noticeSaved')(fmtDur(msg.seconds)), 4000);
@@ -1427,5 +1962,25 @@
     };
   }
 
+  // ---------------------------------------------------------------------------
+  // Start: „Was ist neu“, Update-Prüfung
+  // ---------------------------------------------------------------------------
   logEvent('info', 'start', { version: VERSION });
+  (function startup() {
+    const seen = loadJson(SEEN_KEY, null);
+    const hadData = localStorage.getItem(STATS_KEY) !== null;
+    if (seen !== VERSION) {
+      saveJson(SEEN_KEY, VERSION);
+      if (seen || hadData) {
+        logEvent('info', 'updated', { from: seen || '< 2.0.0', to: VERSION });
+        const show = () => showNotice(t('whatsNew')(VERSION, WHATS_NEW[lang()]), 12000);
+        if (document.body) setTimeout(show, 1500);
+        else document.addEventListener('DOMContentLoaded', () => setTimeout(show, 1500), { once: true });
+      }
+    }
+    const upd = loadJson(UPDATE_KEY, {});
+    if (settings.updateCheck && Date.now() - (upd.checked || 0) > 24 * 3600 * 1000) {
+      setTimeout(checkUpdate, 15 * 1000);
+    }
+  })();
 })();
