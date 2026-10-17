@@ -81,12 +81,12 @@ Das Script spricht **Deutsch und Englisch**. Standardmäßig richtet es sich nac
 - **Letzte Werbepause:** Uhrzeit, Kanal und Methode (Ersatz-Stream oder herausgeschnitten).
 - **Melde-Zeile** mit drei Buttons nebeneinander:
   - **⏱ Zeitstempel:** Kopiert einen Zeitstempel in die Zwischenablage, **ohne etwas zu speichern**. Einfügen mit Strg + V, z. B.:
-    `Werbung nicht blockiert – 17.10.2026 16:23:05 – Kanal: xyz – letzte Methode: Ersatz-Stream (vor 40 s) – Script 1.8.0`
+    `Werbung nicht blockiert – 17.10.2026 16:23:05 – Kanal: xyz – letzte Methode: Ersatz-Stream (vor 40 s) – Script 1.9.0`
   - **⚠ Durchgerutscht:** Speichert die gerade gesehene Werbung im Durchgerutscht-Protokoll und zählt „Durchgerutscht“ um 1 hoch.
   - **🔗 Sync:** Koppelt die beiden Buttons. Ist Sync an (grün), löst ein Klick auf *einen* der beiden Buttons **beide** aus. Grau = aus, die Buttons arbeiten einzeln. Die Einstellung wird gespeichert.
 - **Automatische Erkennung:** Zeigt Twitch im Player seine eigene Werbe-Anzeige (Label „Werbung“ oder Countdown), wird das im Durchgerutscht-Protokoll gespeichert und kurz „Werbung ist durchgerutscht“ eingeblendet. Das ist ein Anhaltspunkt, keine sichere Erkennung: Nicht jede durchgerutschte Werbung wird so erkannt.
 - **Durchgerutscht – Protokoll:** Liste aller Fälle (manuell oder automatisch), bis zu 100 werden gespeichert.
-- **📋 Protokoll kopieren:** Kopiert das Protokoll als Text in die Zwischenablage.
+- **📋 Protokoll kopieren:** Kopiert das komplette Protokoll als Text in die Zwischenablage (siehe „Protokoll zur Fehlersuche“ unten).
 - **🗑 Durchgerutscht leeren:** Löscht das Protokoll und setzt „Durchgerutscht“ auf 0. Blockierte Werbepausen und gesparte Zeit bleiben erhalten.
 - **↺ Zähler zurücksetzen:** Setzt alle Zähler (auch die gesparte Zeit) auf 0.
 - Beide fragen zur Sicherheit nach: Beim 1. Klick wird der Button rot und zeigt „Sicher? Nochmal klicken“. Ein 2. Klick innerhalb von 4 Sekunden führt die Aktion aus, sonst passiert nichts.
@@ -104,6 +104,19 @@ Ganz unten im aufgeklappten Panel. Alles wird sofort gespeichert – am Code mus
 | **Sprache** | Automatisch (Browser), Deutsch oder English |
 
 Alles bleibt **nur lokal in deinem Browser**. Es wird nichts an Twitch oder irgendeinen Server geschickt.
+
+## Protokoll zur Fehlersuche
+
+Das Script schreibt automatisch mit, was passiert – die Browser-Konsole (F12) brauchst du zur Fehlersuche nicht:
+
+- **Stream-Status:** was Twitch beim Laden des Streams antwortet, z. B. „Stream geladen: xyz (6 Qualitäten)“ oder **„Twitch meldet xyz als OFFLINE (HTTP 404)“** / „Twitch verweigert den Stream (HTTP 403)“.
+- **Video-Worker:** ob sich das Script in den Twitch-Player einklinken konnte (wenn nicht, wird Stream-Werbung nicht gefiltert).
+- **Werbepausen:** blockierte Pausen mit Methode und gesparter Zeit, Probleme mit dem Ersatz-Stream.
+- **Fehler:** Fehler im Script, Video-Fehler und Fehlermeldungen des Twitch-Players (z. B. „Fehler #2000“).
+
+Im aufgeklappten Panel steht das **letzte Problem** der vergangenen 24 Stunden (gelb = Warnung, rot = Fehler). **📋 Protokoll kopieren** kopiert alles – Version, Browser, Seite, Einstellungen, die letzten 100 Ereignisse und das Durchgerutscht-Protokoll –, z. B. zum Einfügen in ein [Issue](https://github.com/r79jv66tjh-byte/twitch-adblock/issues). Gespeichert werden bis zu 200 Ereignisse, ältere fallen automatisch weg.
+
+Wird der Stream als offline angezeigt: Steht im Protokoll „OFFLINE (HTTP 404)“, meldet Twitch selbst den Kanal als offline – das liegt nicht am Script. Eigene Fehler kennzeichnet das Script mit „Fehler im Script, Stream lädt ohne Filter weiter“; der Stream lädt dann ganz normal, nur ohne Werbefilter.
 
 ## Tipps
 

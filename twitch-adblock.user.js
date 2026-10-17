@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Adblock (Stream + Banner)
 // @namespace    local.twitch-adblock
-// @version      1.8.0
+// @version      1.9.0
 // @description  Bypasses pre-/mid-roll ads in the Twitch stream (playlist swap) and hides ad banners. Ad counter with time saved, emergency mode, DE/EN.
 // @description:de Umgeht Pre-/Mid-Roll-Werbung im Twitch-Stream (Playlist-Austausch) und blendet Werbebanner aus. Werbe-Zähler mit gesparter Zeit, Notfall-Modus, DE/EN.
 // @license      MIT
@@ -60,6 +60,15 @@
       msg.tabId = cfg.tabId;
       try { if (bc) bc.postMessage(msg); } catch (e) { /* egal */ }
     };
+    // Ereignis fürs Protokoll (Texte übersetzt die Hauptseite anhand des Codes)
+    const log = (level, code, data) => notify(Object.assign({ type: 'log', level, code }, data));
+    const loggedThisBreak = new Set();
+    const logOnce = (key, level, code, data) => {
+      if (loggedThisBreak.has(key)) return;
+      loggedThisBreak.add(key);
+      log(level, code, data);
+    };
+    let lastMediaFailLog = 0;
 
     const streams = new Map();     // URL der Media-Playlist -> { channel, res, fps }
     const backupCache = new Map(); // "kanal|playerType" -> { variants, time, hasAds }
@@ -166,10 +175,14 @@
             },
           }),
         });
-        if (!r.ok) return null;
+        if (!r.ok) { log('warn', 'gqlFail', { playerType, status: r.status }); return null; }
         const json = await r.json();
         const tok = json && json.data && json.data.streamPlaybackAccessToken;
-        if (!tok || !tok.value) return null;
+        if (!tok || !tok.value) {
+          const auth = tok && tok.authorization;
+          log('warn', 'gqlNoToken', { playerType, reason: (auth && auth.forbiddenReasonCode) || (json && json.errors && json.errors[0] && json.errors[0].message) || '' });
+          return null;
+        }
         const params = new URLSearchParams({
           allow_source: 'true', allow_audio_only: 'true', fast_bread: 'true',
           p: String(Math.floor(Math.random() * 1e7)), player_backend: 'mediaplayer',
@@ -178,9 +191,10 @@
           transcode_mode: 'cbr_v1', cdm: 'wv',
         });
         const master = await realFetch('https://usher.ttvnw.net/api/channel/hls/' + encodeURIComponent(channel) + '.m3u8?' + params);
-        if (!master.ok) return null;
+        if (!master.ok) { log('warn', 'backupUsherFail', { playerType, status: master.status }); return null; }
         return { variants: parseMaster(await master.text(), master.url), time: Date.now(), hasAds: false };
       } catch (e) {
+        log('warn', 'backupError', { playerType, message: String((e && e.message) || e) });
         return null;
       }
     }
@@ -201,7 +215,12 @@
           const r = await realFetch(variant.url);
           if (!r.ok) { backupCache.delete(key); continue; }
           const text = await r.text();
-          if (hasAds(text)) { entry.hasAds = true; continue; }
+          if (hasAds(text)) {
+            entry.hasAds = true;
+            logOnce('backupHasAds|' + playerType, 'info', 'backupHasAds', { playerType });
+            continue;
+          }
+          logOnce('backupOk|' + playerType, 'info', 'backupOk', { playerType });
           return text;
         } catch (e) {
           backupCache.delete(key);
@@ -214,35 +233,49 @@
       return new Response(text, { status: res.status, statusText: res.statusText, headers: res.headers });
     }
 
-    self.fetch = async function (input, init) {
+    async function handleFetch(input, init) {
       const url = typeof input === 'string' ? input : (input && input.url) || String(input);
 
       // Master-Playlist: Kanal und Auflösungen der Varianten merken
       if (url.includes('usher.ttvnw.net/api/channel/hls/')) {
-        const res = await realFetch(input, init);
-        if (!res.ok) return res;
-        const text = await res.text();
         const m = url.match(/\/hls\/([^/.?]+)\.m3u8/);
         const channel = m ? decodeURIComponent(m[1]).toLowerCase() : null;
-        for (const v of parseMaster(text, url)) streams.set(v.url, { channel, res: v.res, fps: v.fps });
+        const res = await realFetch(input, init);
+        if (!res.ok) {
+          // 404 = Twitch meldet den Kanal als offline, 403 = Zugriff verweigert
+          log('error', 'usherFail', { channel, status: res.status });
+          return res;
+        }
+        const text = await res.text();
+        const variants = parseMaster(text, url);
+        for (const v of variants) streams.set(v.url, { channel, res: v.res, fps: v.fps });
+        log('info', 'usherOk', { channel, variants: variants.length });
         return rebuild(res, text);
       }
 
       // Media-Playlist: auf Werbung prüfen
       if (url.includes('.m3u8') && (streams.has(url) || url.includes('ttvnw.net'))) {
         const res = await realFetch(input, init);
-        if (!res.ok) return res;
+        if (!res.ok) {
+          if (Date.now() - lastMediaFailLog > 60 * 1000) {
+            lastMediaFailLog = Date.now();
+            log('warn', 'mediaFail', { status: res.status });
+          }
+          return res;
+        }
         let text = await res.text();
         if (hasAds(text)) {
           if (!adActive) {
             adActive = true;
             adStart = Date.now();
             adSpots.clear();
+            loggedThisBreak.clear();
             notify({ type: 'ad-start' });
           }
           collectAdSpots(text);
           const info = streams.get(url);
           const replacement = info && info.channel ? await getBackupPlaylist(info) : null;
+          if (replacement === null) logOnce('stripped', 'info', 'stripped', {});
           text = replacement !== null ? replacement : stripAds(text);
           notify({ type: 'ad', mode: replacement !== null ? 'backup' : 'stripped', channel: info ? info.channel : null });
         } else if (adActive) {
@@ -254,7 +287,19 @@
       }
 
       return realFetch(input, init);
+    }
+
+    // Absicherung: Wirft unser Code einen Fehler, lädt der Stream ganz normal (ohne Filter)
+    self.fetch = async function (input, init) {
+      try {
+        return await handleFetch(input, init);
+      } catch (e) {
+        log('error', 'exception', { message: String((e && e.message) || e) });
+        return realFetch(input, init);
+      }
     };
+
+    log('info', 'workerReady', {});
   }
 
   // ---------------------------------------------------------------------------
@@ -273,15 +318,18 @@
     constructor(scriptURL, options) {
       const url = String(scriptURL);
       let src = null;
+      let readError = null;
       if (url.startsWith('blob:')) {
-        try { src = readBlobSync(url); } catch (e) { src = null; }
+        try { src = readBlobSync(url); } catch (e) { readError = String((e && e.message) || e); }
       }
       if (!src || !/wasmworker|amazon-ivs/i.test(src)) {
+        if (readError) logEvent('warn', 'workerUnreadable', { message: readError });
         super(scriptURL, options);
         return;
       }
       const code = '(' + workerMain.toString() + ')(' + JSON.stringify(CONFIG) + ');\n' + src;
       super(URL.createObjectURL(new Blob([code], { type: 'application/javascript' })), options);
+      logEvent('info', 'workerPatched', {});
     }
   }
 
@@ -322,7 +370,7 @@
       user-select: none; opacity: .8;
     }
     #ttv-adblock-counter:hover, #ttv-adblock-counter.expanded { opacity: 1; }
-    #ttv-adblock-counter.expanded { width: 300px; border-radius: 10px; }
+    #ttv-adblock-counter.expanded { width: 330px; border-radius: 10px; }
     #ttv-adblock-counter.locked { border-color: rgba(145, 70, 255, 0.25); }
     #ttv-adblock-counter .ttv-ab-head {
       display: flex; align-items: center; gap: 4px;
@@ -348,6 +396,12 @@
     #ttv-adblock-counter .ttv-ab-stats b { font-weight: 600; text-align: right; color: #bf94ff; }
     #ttv-adblock-counter .ttv-ab-stats b.bad { color: #ff8a8a; }
     #ttv-adblock-counter .ttv-ab-stats b.good { color: #5fe0a5; }
+    #ttv-adblock-counter .ttv-ab-issue:empty { display: none; }
+    #ttv-adblock-counter .ttv-ab-issue {
+      margin: 6px 0; padding: 5px 7px; border-radius: 6px; font-size: 11px;
+      background: rgba(255, 180, 0, 0.12); color: #ffd37a; border: 1px solid rgba(255, 180, 0, 0.35);
+    }
+    #ttv-adblock-counter .ttv-ab-issue.error { background: rgba(235, 4, 0, 0.15); color: #ffb3b3; border-color: rgba(255, 90, 90, 0.5); }
     #ttv-adblock-counter .ttv-ab-settings-btn {
       display: block; width: 100%; box-sizing: border-box; margin-top: 10px; padding: 5px 7px;
       font-size: 11px; font-weight: 600; color: #adadb8; background: rgba(255, 255, 255, 0.05);
@@ -435,11 +489,13 @@
   // Zähler-Box mit ausklappbarem Panel, Melde-Funktion und Einstellungen
   // (alles im localStorage von twitch.tv gespeichert)
   // ---------------------------------------------------------------------------
-  const VERSION = '1.8.0';
+  const VERSION = '1.9.0';
   const STATS_KEY = 'ttvAdblockStats';
   const BOX_KEY = 'ttvAdblockCounterBox';
   const REPORTS_KEY = 'ttvAdblockReports';
   const SETTINGS_KEY = 'ttvAdblockSettings';
+  const EVENTS_KEY = 'ttvAdblockEvents';
+  const MAX_EVENTS = 200;
   const MAX_REPORTS = 100;
 
   // Datum in Ortszeit (für „Heute“)
@@ -557,6 +613,45 @@
       logManual: 'manuell gemeldet',
       logMethod: 'letzte Methode',
       logNoAd: 'keine Werbung erkannt',
+      logPage: 'Seite',
+      logLang: 'Sprache',
+      logSettings: 'Einstellungen',
+      logWorker: 'Video-Worker in diesem Tab verbunden',
+      yes: 'ja',
+      no: 'nein',
+      on: 'an',
+      off: 'aus',
+      logEvents: 'Ereignisse (neueste zuerst)',
+      logLeaks: 'Durchgerutscht',
+      lastIssue: 'Letztes Problem',
+      level: { info: 'INFO', warn: 'WARNUNG', error: 'FEHLER' },
+      ev: {
+        start: (d) => 'Script ' + d.version + ' gestartet',
+        workerPatched: () => 'Video-Worker von Twitch übernommen',
+        workerReady: () => 'Video-Worker verbunden – Stream-Werbung wird gefiltert',
+        workerUnreadable: (d) => 'Video-Worker konnte nicht gelesen werden – Stream-Werbung wird NICHT gefiltert (' + d.message + ')',
+        noWorker: () => 'Kein Video-Worker erkannt – Twitch hat evtl. etwas geändert, Stream-Werbung wird nicht gefiltert',
+        usherOk: (d) => 'Stream geladen: ' + d.channel + ' (' + d.variants + ' Qualitäten)',
+        usherFail: (d) => d.status === 404
+          ? 'Twitch meldet ' + d.channel + ' als OFFLINE (HTTP 404) – Twitch selbst liefert keinen Stream'
+          : d.status === 403
+            ? 'Twitch verweigert den Stream von ' + d.channel + ' (HTTP 403) – z. B. Region, Abo-only oder Anmeldung'
+            : 'Stream-Liste für ' + d.channel + ' fehlgeschlagen (HTTP ' + d.status + ')',
+        mediaFail: (d) => 'Stream-Abschnitt konnte nicht geladen werden (HTTP ' + d.status + ')',
+        gqlFail: (d) => 'Ersatz-Stream (' + d.playerType + '): Anfrage bei Twitch fehlgeschlagen (HTTP ' + d.status + ')',
+        gqlNoToken: (d) => 'Ersatz-Stream (' + d.playerType + '): kein Zugang von Twitch' + (d.reason ? ' (' + d.reason + ')' : ''),
+        backupUsherFail: (d) => 'Ersatz-Stream (' + d.playerType + '): Stream-Liste fehlgeschlagen (HTTP ' + d.status + ')',
+        backupError: (d) => 'Ersatz-Stream (' + d.playerType + '): Fehler – ' + d.message,
+        backupHasAds: (d) => 'Ersatz-Stream (' + d.playerType + ') hat ebenfalls Werbung',
+        backupOk: (d) => 'Werbefreier Ersatz-Stream aktiv (' + d.playerType + ')',
+        stripped: () => 'Kein werbefreier Ersatz-Stream – Werbung wird herausgeschnitten',
+        exception: (d) => 'Fehler im Script, Stream lädt ohne Filter weiter: ' + d.message,
+        adBreak: (d) => 'Werbepause blockiert (' + modeText(d.mode) + (d.seconds ? ', ' + fmtDur(d.seconds) + ' gespart' : '') + ')',
+        leakAuto: () => 'Werbung durchgerutscht (von Twitch angezeigt)',
+        leakManual: () => 'Werbung durchgerutscht (manuell gemeldet)',
+        videoError: (d) => 'Video-Fehler im Player (Code ' + d.code + ')' + (d.message ? ': ' + d.message : ''),
+        playerError: (d) => 'Twitch-Player zeigt Fehler: ' + d.text,
+      },
     },
     en: {
       locale: 'en-GB',
@@ -626,6 +721,45 @@
       logManual: 'reported manually',
       logMethod: 'last method',
       logNoAd: 'no ad detected',
+      logPage: 'Page',
+      logLang: 'Language',
+      logSettings: 'Settings',
+      logWorker: 'Video worker connected in this tab',
+      yes: 'yes',
+      no: 'no',
+      on: 'on',
+      off: 'off',
+      logEvents: 'Events (newest first)',
+      logLeaks: 'Slipped through',
+      lastIssue: 'Last problem',
+      level: { info: 'INFO', warn: 'WARNING', error: 'ERROR' },
+      ev: {
+        start: (d) => 'Script ' + d.version + ' started',
+        workerPatched: () => 'Took over Twitch video worker',
+        workerReady: () => 'Video worker connected – stream ads are filtered',
+        workerUnreadable: (d) => 'Could not read video worker – stream ads are NOT filtered (' + d.message + ')',
+        noWorker: () => 'No video worker detected – Twitch may have changed something, stream ads are not filtered',
+        usherOk: (d) => 'Stream loaded: ' + d.channel + ' (' + d.variants + ' qualities)',
+        usherFail: (d) => d.status === 404
+          ? 'Twitch reports ' + d.channel + ' as OFFLINE (HTTP 404) – Twitch itself delivers no stream'
+          : d.status === 403
+            ? 'Twitch denies the stream of ' + d.channel + ' (HTTP 403) – e.g. region, sub-only or login'
+            : 'Stream list for ' + d.channel + ' failed (HTTP ' + d.status + ')',
+        mediaFail: (d) => 'Could not load stream segment list (HTTP ' + d.status + ')',
+        gqlFail: (d) => 'Replacement stream (' + d.playerType + '): request to Twitch failed (HTTP ' + d.status + ')',
+        gqlNoToken: (d) => 'Replacement stream (' + d.playerType + '): no access from Twitch' + (d.reason ? ' (' + d.reason + ')' : ''),
+        backupUsherFail: (d) => 'Replacement stream (' + d.playerType + '): stream list failed (HTTP ' + d.status + ')',
+        backupError: (d) => 'Replacement stream (' + d.playerType + '): error – ' + d.message,
+        backupHasAds: (d) => 'Replacement stream (' + d.playerType + ') has ads as well',
+        backupOk: (d) => 'Ad-free replacement stream active (' + d.playerType + ')',
+        stripped: () => 'No ad-free replacement stream – ads are being cut out',
+        exception: (d) => 'Script error, stream continues without filter: ' + d.message,
+        adBreak: (d) => 'Ad break blocked (' + modeText(d.mode) + (d.seconds ? ', ' + fmtDur(d.seconds) + ' saved' : '') + ')',
+        leakAuto: () => 'Ad slipped through (shown by Twitch)',
+        leakManual: () => 'Ad slipped through (reported manually)',
+        videoError: (d) => 'Video error in player (code ' + d.code + ')' + (d.message ? ': ' + d.message : ''),
+        playerError: (d) => 'Twitch player shows error: ' + d.text,
+      },
     },
   };
 
@@ -648,6 +782,7 @@
   const modeText = (mode) => (mode === 'backup' ? t('modeBackup') : mode === 'stripped' ? t('modeStripped') : '?');
 
   let sessionCount = 0;
+  let workerSeen = false; // hat sich der Video-Worker in diesem Tab gemeldet?
   let lastAd = null; // { time, channel, mode } der letzten Werbepause in diesem Tab
   let notice = null;
   let noticeTimer = null;
@@ -776,14 +911,70 @@
     btn._flashTimer = setTimeout(() => { btn.textContent = btn.dataset.label; }, 1500);
   }
 
+  // ---------------------------------------------------------------------------
+  // Ereignis-Protokoll (Fehler, Stream-Status, Werbepausen) – für die Fehlersuche
+  // ---------------------------------------------------------------------------
+  function loadEvents() {
+    const e = loadJson(EVENTS_KEY, []);
+    return Array.isArray(e) ? e : [];
+  }
+
+  function logEvent(level, code, data) {
+    try {
+      const events = loadEvents();
+      const entry = { t: Date.now(), level, code, data: data || {}, ch: currentChannel() };
+      const last = events[0];
+      // gleiches Ereignis kurz hintereinander nur hochzählen
+      if (last && last.code === code && last.level === level && last.ch === entry.ch
+          && JSON.stringify(last.data) === JSON.stringify(entry.data) && entry.t - last.t < 60 * 1000) {
+        last.n = (last.n || 1) + 1;
+        last.t = entry.t;
+      } else {
+        events.unshift(entry);
+      }
+      saveJson(EVENTS_KEY, events.slice(0, MAX_EVENTS));
+      if (level !== 'info' && ui.root && box.expanded) renderCounter();
+    } catch (e) { /* Protokoll darf nie das Script stören */ }
+  }
+
+  function eventText(e) {
+    const fn = TEXT[lang()].ev[e.code];
+    let text;
+    try { text = fn ? fn(e.data || {}) : e.code; } catch (err) { text = e.code; }
+    return text + (e.n > 1 ? ' (×' + e.n + ')' : '');
+  }
+
+  function fmtTimeSec(ms) {
+    const d = new Date(ms);
+    return d.toLocaleDateString(t('locale'), { day: '2-digit', month: '2-digit' }) + ' '
+      + d.toLocaleTimeString(t('locale'), { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  }
+
+  function lastIssue() {
+    return loadEvents().find((e) => e.level !== 'info' && Date.now() - e.t < 24 * 3600 * 1000) || null;
+  }
+
   function reportsAsText() {
     const s = loadStats();
+    const onOff = (v) => (v ? t('on') : t('off'));
     const lines = [
       'Twitch Adblock ' + VERSION + ' – ' + t('logHeader'),
       t('logSummary')(s),
       'Browser: ' + navigator.userAgent,
+      t('logPage') + ': ' + location.pathname + ' · ' + t('logLang') + ': ' + lang(),
+      t('logSettings') + ': ' + t('setNotice') + ' ' + onOff(settings.showNotice)
+        + ', ' + t('setCounter') + ' ' + onOff(settings.showCounter)
+        + ', ' + t('setAuto') + ' ' + onOff(settings.autoDetect)
+        + ', ' + t('setEmergency') + ' ' + onOff(settings.emergency),
+      t('logWorker') + ': ' + (workerSeen ? t('yes') : t('no')),
       '',
+      '== ' + t('logEvents') + ' ==',
     ];
+    for (const e of loadEvents().slice(0, 100)) {
+      lines.push(fmtTimeSec(e.t) + ' [' + (TEXT[lang()].level[e.level] || e.level) + '] '
+        + (e.ch ? e.ch + ': ' : '') + eventText(e));
+    }
+    lines.push('', '== ' + t('logLeaks') + ' ==');
     for (const r of loadReports()) {
       lines.push(fmtTime(r.time) + ' | ' + (r.channel || '?') + ' | '
         + (r.auto ? t('logAuto') : t('logManual'))
@@ -917,6 +1108,7 @@
     ui.vSavedTotal = row(t('statSavedTotal'), 'good');
     ui.vLeaked = row(t('statLeaked'), 'bad');
     ui.last = el('div', 'ttv-ab-muted');
+    ui.issue = el('div', 'ttv-ab-issue');
     // Melde-Zeile: [Zeitstempel] [Durchgerutscht] [Sync]
     ui.reportRow = el('div', 'ttv-ab-reportrow');
     ui.stamp = el('button', 'ttv-ab-stamp', t('stamp'));
@@ -933,7 +1125,7 @@
     ui.reset = el('button', '', t('resetAll'));
     actions.append(ui.copy, ui.clear, ui.reset);
     buildSettings();
-    ui.panel.append(stats, ui.last, ui.reportRow, ui.listTitle, ui.list, actions, ui.settingsBtn, ui.settingsWrap);
+    ui.panel.append(stats, ui.last, ui.issue, ui.reportRow, ui.listTitle, ui.list, actions, ui.settingsBtn, ui.settingsWrap);
 
     ui.root.append(ui.head, ui.panel);
     document.body.appendChild(ui.root);
@@ -1024,6 +1216,11 @@
       ui.last.textContent = lastAd
         ? t('lastAd')(fmtTime(lastAd.time), lastAd.channel, modeText(lastAd.mode))
         : t('noAdYet');
+      const issue = lastIssue();
+      ui.issue.textContent = issue
+        ? '⚠ ' + t('lastIssue') + ' (' + fmtTime(issue.t) + '): ' + eventText(issue)
+        : '';
+      ui.issue.classList.toggle('error', !!issue && issue.level === 'error');
 
       const reports = loadReports();
       ui.list.replaceChildren();
@@ -1073,6 +1270,7 @@
     const s = loadStats();
     s.leaked++;
     saveStats(s);
+    logEvent('warn', auto ? 'leakAuto' : 'leakManual', {});
     renderCounter();
   }
 
@@ -1136,6 +1334,36 @@
       : t('leakEmergency'), 6000);
   }, 500);
 
+  // Überwachung für das Protokoll: Video-Fehler, Fehlermeldungen des Players,
+  // und ob sich der Video-Worker überhaupt meldet
+  const watchedVideos = new WeakSet();
+  const pageStart = Date.now();
+  let noWorkerLogged = false;
+  let lastPlayerError = '';
+  setInterval(() => {
+    if (!document.body) return;
+    for (const v of document.querySelectorAll('video')) {
+      if (watchedVideos.has(v)) continue;
+      watchedVideos.add(v);
+      v.addEventListener('error', () => {
+        const err = v.error || {};
+        logEvent('error', 'videoError', { code: err.code || '?', message: err.message || '' });
+      });
+    }
+    // Twitch zeigt Player-Fehler als Text wie „Fehler #2000“ / „Error #4000“
+    const player = document.querySelector('[data-a-target="video-player"]') || document.querySelector('.video-player');
+    const m = player && (player.textContent || '').match(/[^.\n]{0,80}(?:Fehler|Error)\s*#\s*\d{3,5}[^.\n]{0,40}/i);
+    const text = m ? m[0].trim() : '';
+    if (text && text !== lastPlayerError) logEvent('error', 'playerError', { text });
+    lastPlayerError = text;
+    // Kein Video-Worker 20 s nach dem Laden, obwohl ein Video da ist
+    if (!workerSeen && !noWorkerLogged && Date.now() - pageStart > 20 * 1000
+        && currentChannel() && document.querySelector('video')) {
+      noWorkerLogged = true;
+      logEvent('warn', 'noWorker', {});
+    }
+  }, 2000);
+
   // ---------------------------------------------------------------------------
   // Hinweis direkt über der Box (oder darunter, wenn oben kein Platz ist)
   // ---------------------------------------------------------------------------
@@ -1177,7 +1405,11 @@
     bc.onmessage = (e) => {
       const msg = e.data || {};
       if (msg.tabId !== CONFIG.tabId) return; // Meldung aus einem anderen Tab
-      if (msg.type === 'ad-start') {
+      if (msg.type === 'log') {
+        const { type, tabId, level, code, ...data } = msg;
+        if (code === 'workerReady') workerSeen = true;
+        logEvent(level, code, data);
+      } else if (msg.type === 'ad-start') {
         lastAd = { time: Date.now(), channel: currentChannel(), mode: null };
         countAdBreak();
       } else if (msg.type === 'ad') {
@@ -1187,10 +1419,13 @@
         showNotice(msg.mode === 'backup' ? t('noticeBackup') : t('noticeStripped'));
         if (box.expanded) renderCounter();
       } else if (msg.type === 'ad-end') {
+        logEvent('info', 'adBreak', { mode: lastAd ? lastAd.mode : null, seconds: msg.seconds || 0 });
         addSavedTime(msg.seconds);
         if (msg.seconds > 0) showNotice(t('noticeSaved')(fmtDur(msg.seconds)), 4000);
         else showNotice(null);
       }
     };
   }
+
+  logEvent('info', 'start', { version: VERSION });
 })();

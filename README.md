@@ -83,12 +83,12 @@ The script speaks **English and German**. By default it follows your browser lan
 - **Last ad break:** time, channel and method (replacement stream or cut out).
 - **Report row** with three buttons side by side:
   - **⏱ Timestamp:** copies a timestamp to the clipboard **without saving anything**. Paste with Ctrl + V, e.g.:
-    `Ad not blocked – 17/10/2026 16:23:05 – Channel: xyz – last method: replacement stream (40 s ago) – Script 1.8.0`
+    `Ad not blocked – 17/10/2026 16:23:05 – Channel: xyz – last method: replacement stream (40 s ago) – Script 1.9.0`
   - **⚠ Slipped through:** saves the ad you just saw to the slipped-through log and increases the counter by 1.
   - **🔗 Sync:** links the two buttons. With sync on (green), clicking *either* button triggers **both**. Grey = off, the buttons work independently. The setting is saved.
 - **Automatic detection:** if Twitch shows its own ad UI in the player (the "Ad" label or countdown), this is saved to the slipped-through log and "Ad slipped through" is shown briefly. This is a hint, not reliable detection: not every ad that slips through is caught this way.
 - **Slipped through – log:** list of all cases (manual or automatic), up to 100 are kept.
-- **📋 Copy log:** copies the log as text to the clipboard.
+- **📋 Copy log:** copies the full log as text to the clipboard (see "Troubleshooting log" below).
 - **🗑 Clear slipped through:** deletes the log and resets the "slipped through" counter to 0. Blocked ad breaks and time saved are kept.
 - **↺ Reset counters:** resets all counters (including time saved) to 0.
 - Both ask for confirmation: on the 1st click the button turns red and shows "Sure? Click again". A 2nd click within 4 seconds performs the action; otherwise nothing happens.
@@ -106,6 +106,19 @@ At the bottom of the expanded panel. All settings are saved immediately – no n
 | **Language** | Automatic (browser), Deutsch or English |
 
 Everything stays **only locally in your browser**. Nothing is sent to Twitch or any server.
+
+## Troubleshooting log
+
+The script automatically records what happens – so you don't need the browser console (F12) to find problems:
+
+- **Stream status:** what Twitch answers when the stream is loaded, e.g. "Stream loaded: xyz (6 qualities)" or **"Twitch reports xyz as OFFLINE (HTTP 404)"** / "Twitch denies the stream (HTTP 403)".
+- **Video worker:** whether the script could hook into the Twitch player (if not, stream ads are not filtered).
+- **Ad breaks:** blocked breaks with method and time saved, problems with the replacement stream.
+- **Errors:** script errors, video errors and error messages of the Twitch player (e.g. "Error #2000").
+
+In the expanded panel the **last problem** of the past 24 hours is shown (yellow = warning, red = error). **📋 Copy log** copies everything – version, browser, page, settings, the last 100 events and the slipped-through log – so you can paste it into an [issue](https://github.com/r79jv66tjh-byte/twitch-adblock/issues). The script stores up to 200 events; older ones are removed automatically.
+
+If the stream is shown as offline: if the log says "OFFLINE (HTTP 404)", Twitch itself reports the channel as offline – that's not caused by the script. Its own errors are marked "Script error, stream continues without filter"; in that case the stream keeps loading normally without the ad filter.
 
 ## Tips
 
