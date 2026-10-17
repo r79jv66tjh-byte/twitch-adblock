@@ -1,116 +1,121 @@
 # Twitch Adblock – Userscript
 
-Blockiert bzw. umgeht auf twitch.tv:
+🇬🇧 **English** | [🇩🇪 Deutsch](README.de.md)
 
-- **Werbung im Stream** (Pre-Rolls und Mid-Rolls)
-- **Werbebanner und Overlays** auf der Seite (Display-Ads, „Werbung“-Label, Countdown, Amazon-Ad-Iframes)
+Blocks or bypasses on twitch.tv:
 
-## Wichtig vorab – ehrliche Einschätzung
+- **Ads in the stream** (pre-rolls and mid-rolls)
+- **Ad banners and overlays** on the page (display ads, "Ad" label, countdown, Amazon ad iframes)
 
-Twitch schneidet die Werbung **serverseitig direkt in den Videostream** ein („Stitched Ads“). Es gibt also keine separate Werbe-Adresse, die man einfach sperren könnte, wie bei normalen Bannern. Das Script arbeitet deshalb so:
+> **Note:** The on-screen texts of the script (counter, notices, buttons) are currently in **German**. The button names are listed below with their English meaning.
 
-1. Es erkennt Werbesegmente in der Stream-Playlist.
-2. Es fragt bei Twitch einen **zweiten Stream** mit einem anderen Player-Typ an (z. B. „embed“), der oft werbefrei ist, und spielt diesen während der Werbepause ab.
-3. Klappt das nicht, **schneidet es die Werbesegmente heraus**. Dann bleibt das Bild ggf. für die Dauer der Werbung stehen oder wird schwarz – aber du siehst/hörst keine Werbung.
+## Important – an honest assessment
 
-**Kein Blocker garantiert, dass alle Werbung verschwindet.** Twitch ändert sein System regelmäßig; dann kann das Script von heute auf morgen teilweise oder gar nicht mehr funktionieren. Während einer Werbepause kann die Qualität kurz sinken (der Ersatz-Stream hat manchmal nur eine niedrigere Auflösung) oder der Stream kurz ruckeln. Werbung auf VODs (Aufzeichnungen) wird nicht behandelt.
+Twitch inserts ads **server-side directly into the video stream** ("stitched ads"). There is no separate ad address that could simply be blocked like a regular banner. The script therefore works like this:
 
-Rechtlicher Hinweis: Das Blockieren von Werbung kann gegen die Nutzungsbedingungen von Twitch verstoßen. Die Nutzung erfolgt auf eigene Verantwortung. Wer Streamer unterstützen möchte, kann das über Abos oder Twitch Turbo tun.
+1. It detects ad segments in the stream playlist.
+2. It requests a **second stream** from Twitch with a different player type (e.g. "embed"), which is often ad-free, and plays it during the ad break.
+3. If that fails, it **cuts the ad segments out**. The picture may then freeze or go black for the length of the ad – but you won't see or hear the ad.
+
+**No blocker can guarantee that all ads disappear.** Twitch changes its system regularly; the script may then stop working partially or completely overnight. During an ad break the quality may drop briefly (the replacement stream sometimes only has a lower resolution) or the stream may stutter. Ads on VODs (recordings) are not handled.
+
+Legal notice: Blocking ads may violate Twitch's Terms of Service. Use at your own risk. If you want to support streamers, consider subscriptions or Twitch Turbo.
 
 ## Installation (Chrome, Edge, Firefox)
 
-### 1. Userscript-Manager installieren
+### 1. Install a userscript manager
 
-Installiere **eine** dieser Erweiterungen aus dem offiziellen Store deines Browsers:
+Install **one** of these extensions from your browser's official store:
 
 - **Tampermonkey** (Chrome, Edge, Firefox)
 - **Violentmonkey** (Chrome, Edge, Firefox)
 
-### 2. Nur bei Chrome/Edge: Userscripts erlauben
+### 2. Chrome/Edge only: allow userscripts
 
-Neuere Chrome- und Edge-Versionen verlangen eine zusätzliche Freigabe:
+Recent versions of Chrome and Edge require an extra permission:
 
-- Rechtsklick auf das Tampermonkey-Symbol → **Erweiterung verwalten**
-- Den Schalter **„Nutzerscripts zulassen“** (bzw. „Allow User Scripts“) einschalten
-- Falls es diesen Schalter nicht gibt: unter `chrome://extensions` bzw. `edge://extensions` oben rechts den **Entwicklermodus** aktivieren.
+- Right-click the Tampermonkey icon → **Manage extension**
+- Turn on **"Allow User Scripts"**
+- If that switch doesn't exist: enable **Developer mode** in the top right of `chrome://extensions` or `edge://extensions`.
 
-### 3. Script hinzufügen
+### 3. Add the script
 
-**Empfohlen – direkt von GitHub (mit automatischen Updates):**
-Klicke auf **[twitch-adblock.user.js installieren](https://raw.githubusercontent.com/r79jv66tjh-byte/twitch-adblock/main/twitch-adblock.user.js)**. Tampermonkey/Violentmonkey öffnet die Installationsseite → **Installieren** klicken.
-So installiert, prüft Tampermonkey regelmäßig selbst, ob es eine neue Version gibt (manuell: Tampermonkey-Symbol → **Nach Userscript-Updates suchen**).
+**Recommended – directly from GitHub (with automatic updates):**
+Click **[install twitch-adblock.user.js](https://raw.githubusercontent.com/r79jv66tjh-byte/twitch-adblock/main/twitch-adblock.user.js)**. Tampermonkey/Violentmonkey opens the install page → click **Install**.
+Installed this way, Tampermonkey checks for new versions on its own (manually: Tampermonkey icon → **Check for userscript updates**).
 
-**Variante A – per Drag & Drop:**
-Ziehe die Datei `twitch-adblock.user.js` in ein Browserfenster. Tampermonkey/Violentmonkey öffnet die Installationsseite → **Installieren** klicken.
+**Option A – drag & drop:**
+Drag the file `twitch-adblock.user.js` into a browser window. Tampermonkey/Violentmonkey opens the install page → click **Install**.
 
-**Variante B – manuell:**
-1. Auf das Tampermonkey-Symbol klicken → **Neues Script erstellen**
-2. Den kompletten Vorlagentext löschen
-3. Den Inhalt von `twitch-adblock.user.js` einfügen
-4. Mit **Strg + S** speichern
+**Option B – manually:**
+1. Click the Tampermonkey icon → **Create a new script**
+2. Delete the whole template text
+3. Paste the contents of `twitch-adblock.user.js`
+4. Save with **Ctrl + S**
 
-### 4. Testen
+### 4. Test
 
-1. Twitch-Tab **neu laden** (am besten Strg + F5).
-2. Einen Kanal öffnen. Unten links erscheint der Zähler „🛡 0 Werbepausen blockiert“.
-3. Wenn Werbung kommt, erscheint darüber ein lila Hinweis:
-   - „Werbung erkannt – werbefreier Ersatz-Stream aktiv“ oder
-   - „Werbung wird herausgeschnitten – Bild kann kurz stehen bleiben“
+1. **Reload** the Twitch tab (preferably Ctrl + F5).
+2. Open a channel. The counter "🛡 0 Werbepausen blockiert" (= "0 ad breaks blocked") appears in the bottom left.
+3. When an ad starts, a purple notice appears above it:
+   - "Werbung erkannt – werbefreier Ersatz-Stream aktiv" (= ad detected – ad-free replacement stream active) or
+   - "Werbung wird herausgeschnitten – Bild kann kurz stehen bleiben" (= ad is being cut out – picture may freeze briefly)
 
-## Werbe-Zähler
+## Ad counter
 
-- Unten links zeigt das Script an, wie viele **Werbepausen** insgesamt abgefangen wurden (eine Werbepause kann aus mehreren Spots bestehen, gezählt wird die Pause).
-- **Verschieben:** Box an der oberen Zeile mit der Maus an die gewünschte Stelle ziehen. Die Position wird gespeichert und bleibt nach dem Neuladen erhalten.
-- **Sperren:** Auf das Schloss klicken. 🔓 = verschiebbar, 🔒 = gesperrt (kann nicht mehr versehentlich verschoben werden). Nochmal klicken entsperrt sie wieder.
-- **Aufklappen:** Auf ▾ klicken (oder Doppelklick auf die Zeile). ▴ klappt wieder ein. Der Zustand wird gespeichert.
-- Der lila Werbe-Hinweis erscheint immer direkt über der Box (oder darunter, wenn sie ganz oben sitzt).
-- Gespeichert wird im Browser-Speicher von twitch.tv und überlebt Neuladen und Browser-Neustart. Wer die Website-Daten von Twitch löscht, setzt alles zurück.
-- Ausblenden: im Script oben `showCounter: true` auf `false` setzen.
+- In the bottom left the script shows how many **ad breaks** have been blocked in total (one ad break can contain several spots; the break is counted).
+- **Move:** drag the box by its top row to wherever you like. The position is saved and survives reloads.
+- **Lock:** click the lock. 🔓 = movable, 🔒 = locked (can't be moved by accident). Click again to unlock.
+- **Expand:** click ▾ (or double-click the row). ▴ collapses it again. The state is saved.
+- The purple ad notice always appears directly above the box (or below it if the box is at the very top).
+- Everything is stored in twitch.tv's browser storage and survives reloads and browser restarts. Clearing Twitch's site data resets everything.
+- Hide it: set `showCounter: true` to `false` at the top of the script.
 
-### Aufgeklapptes Panel
+### Expanded panel
 
-- **Statistik:** Dieser Tab / Heute / Insgesamt blockiert, dazu **Durchgerutscht** (rot).
-- **Letzte Werbepause:** Uhrzeit, Kanal und Methode (Ersatz-Stream oder herausgeschnitten).
-- **Melde-Zeile** mit drei Buttons nebeneinander:
-  - **⏱ Zeitstempel:** Kopiert einen Zeitstempel in die Zwischenablage, **ohne etwas zu speichern**. Einfügen mit Strg + V, z. B.:
+- **Statistics:** "Dieser Tab" / "Heute" / "Insgesamt" (this tab / today / total) blocked, plus **"Durchgerutscht"** (slipped through, red).
+- **Last ad break:** time, channel and method ("Ersatz-Stream" = replacement stream, "herausgeschnitten" = cut out).
+- **Report row** with three buttons side by side:
+  - **⏱ Zeitstempel** (timestamp): copies a timestamp to the clipboard **without saving anything**. Paste with Ctrl + V, e.g.:
     `Werbung nicht blockiert – 17.10.2026 16:23:05 – Kanal: xyz – letzte Methode: Ersatz-Stream (vor 40 s) – Script 1.6.0`
-  - **⚠ Durchgerutscht:** Speichert die gerade gesehene Werbung im Durchgerutscht-Protokoll und zählt „Durchgerutscht“ um 1 hoch.
-  - **🔗 Sync:** Koppelt die beiden Buttons. Ist Sync an (grün), löst ein Klick auf *einen* der beiden Buttons **beide** aus: Zeitstempel kopieren **und** als durchgerutscht speichern. Grau = aus, die Buttons arbeiten einzeln. Die Einstellung wird gespeichert.
-- **Automatische Erkennung:** Zeigt Twitch im Player seine eigene Werbe-Anzeige (Label „Werbung“ oder Countdown), wird das im Durchgerutscht-Protokoll gespeichert und kurz „Werbung ist durchgerutscht“ eingeblendet. Das ist ein Anhaltspunkt, keine sichere Erkennung: Nicht jede durchgerutschte Werbung wird so erkannt.
-- **Durchgerutscht – Protokoll:** Liste aller Fälle (manuell oder automatisch), bis zu 100 werden gespeichert.
-- **📋 Protokoll kopieren:** Kopiert das Durchgerutscht-Protokoll als Text in die Zwischenablage.
-- **🗑 Durchgerutscht leeren:** Löscht das Protokoll und setzt den Zähler „Durchgerutscht“ auf 0. Die Zahl der blockierten Werbepausen bleibt erhalten.
-- **↺ Zähler zurücksetzen:** Setzt alle Zähler auf 0.
-- Beide fragen zur Sicherheit nach: Beim 1. Klick wird der Button rot und zeigt „Sicher? Nochmal klicken“. Ein 2. Klick innerhalb von 4 Sekunden führt die Aktion aus, sonst passiert nichts.
+  - **⚠ Durchgerutscht** (slipped through): saves the ad you just saw to the slipped-through log and increases the "Durchgerutscht" counter by 1.
+  - **🔗 Sync:** links the two buttons. With sync on (green), clicking *either* button triggers **both**: copy the timestamp **and** save it as slipped through. Grey = off, the buttons work independently. The setting is saved.
+- **Automatic detection:** if Twitch shows its own ad UI in the player (the "Ad" label or countdown), this is saved to the slipped-through log and "Werbung ist durchgerutscht" (ad slipped through) is shown briefly. This is a hint, not reliable detection: not every ad that slips through is caught this way.
+- **Durchgerutscht – Protokoll** (slipped-through log): list of all cases (manual or automatic), up to 100 are kept.
+- **📋 Protokoll kopieren** (copy log): copies the slipped-through log as text to the clipboard.
+- **🗑 Durchgerutscht leeren** (clear slipped-through): deletes the log and resets the "Durchgerutscht" counter to 0. The number of blocked ad breaks is kept.
+- **↺ Zähler zurücksetzen** (reset counters): resets all counters to 0.
+- Both ask for confirmation: on the 1st click the button turns red and shows "Sicher? Nochmal klicken" (sure? click again). A 2nd click within 4 seconds performs the action; otherwise nothing happens.
 
-Alles bleibt **nur lokal in deinem Browser**. Es wird nichts an Twitch oder irgendeinen Server geschickt.
+Everything stays **only locally in your browser**. Nothing is sent to Twitch or any server.
 
-## Tipps
+## Tips
 
-- **Zusätzlich uBlock Origin** (bzw. „uBlock Origin Lite“ in Chrome) zu nutzen schadet nicht – das fängt weitere Tracker und Banner ab. Das Script und uBlock vertragen sich.
-- Den Hinweis abschalten: im Script oben `showNotice: true` auf `false` setzen.
-- Bleibt der Stream schwarz oder lädt nicht: Script im Userscript-Manager kurz deaktivieren und Seite neu laden, um zu prüfen, ob das Script die Ursache ist.
-- Funktioniert die Stream-Werbung nicht mehr, hat Twitch vermutlich etwas geändert. Gut gepflegte Alternativen sind z. B. die Projekte „TwitchAdSolutions“ (vaft) auf GitHub.
+- Using **uBlock Origin** (or "uBlock Origin Lite" in Chrome) in addition doesn't hurt – it catches more trackers and banners. The script and uBlock work fine together.
+- Turn off the notice: set `showNotice: true` to `false` at the top of the script.
+- If the stream stays black or won't load: briefly disable the script in the userscript manager and reload the page to check whether the script is the cause.
+- If stream ads are no longer blocked, Twitch has probably changed something. Well-maintained alternatives include the "TwitchAdSolutions" (vaft) project on GitHub.
 
-## Dateien
+## Files
 
-| Datei | Inhalt |
+| File | Contents |
 |---|---|
-| `twitch-adblock.user.js` | Das Userscript |
-| `README.md` | Diese Anleitung |
-| `LICENSE` | MIT-Lizenz |
+| `twitch-adblock.user.js` | The userscript |
+| `README.md` | This guide (English) |
+| `README.de.md` | Guide in German |
+| `LICENSE` | MIT license |
 
-## Lizenz
+## License
 
-[MIT](LICENSE) – frei nutzbar, veränderbar und weitergebbar, solange der Lizenzhinweis erhalten bleibt. Ohne jede Gewähr.
+[MIT](LICENSE) – free to use, modify and share as long as the license notice is kept. No warranty of any kind.
 
-## Neue Version veröffentlichen (für den Repo-Besitzer)
+## Publishing a new version (for the repo owner)
 
-1. Änderungen in `twitch-adblock.user.js` machen.
-2. Oben im Script **`@version` erhöhen** (z. B. `1.6.0` → `1.6.1`) und die Konstante `VERSION` weiter unten ebenso – nur bei höherer Versionsnummer laden Tampermonkey & Co. das Update.
-3. Committen und pushen:
+1. Make changes in `twitch-adblock.user.js`.
+2. **Increase `@version`** at the top of the script (e.g. `1.6.0` → `1.6.1`) and the `VERSION` constant further down as well – Tampermonkey & co. only fetch the update when the version number is higher.
+3. Commit and push:
    ```bash
    git add -A
-   git commit -m "Version 1.6.1: kurze Beschreibung"
+   git commit -m "Version 1.6.1: short description"
    git push
    ```
