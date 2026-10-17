@@ -172,6 +172,51 @@ test('Vom Player abgebrochene Anfrage ist kein Script-Fehler', async () => {
   assert.ok(!w.logs().includes('exception'), 'nicht als Fehler protokolliert');
 });
 
+// Mehrere Player-Typen: embed hat Werbung, popout liefert 360p, autoplay 720p (beide werbefrei)
+function multiTypeFetch() {
+  const BACKUP_RES = { embed: '1920x1080', popout: '640x360', autoplay: '1280x720' };
+  return async (url, init) => {
+    url = String(url);
+    if (url.includes('gql')) {
+      const type = JSON.parse(init.body).variables.playerType;
+      return resp(JSON.stringify({ data: { streamPlaybackAccessToken: { value: type, signature: 'sig' } } }));
+    }
+    if (url.includes('usher') && url.includes('sig=')) {
+      const type = new URL(url).searchParams.get('token');
+      return resp('#EXTM3U\n#EXT-X-STREAM-INF:RESOLUTION=' + BACKUP_RES[type] + '\nhttps://x.ttvnw.net/v1/playlist/B-' + type + '.m3u8\n');
+    }
+    if (url.includes('usher')) return resp(MASTER('https://x.ttvnw.net/v1/playlist/MAIN.m3u8'));
+    if (url.includes('B-embed')) return resp(AD);
+    if (url.includes('B-')) return resp('#EXTM3U\n#EXTINF:2.000,live\nhttps://' + url.split('B-')[1].split('.')[0] + '/b.ts\n');
+    return resp(AD);
+  };
+}
+
+test('Ersatz-Stream: werbefreier Player-Typ mit der besten Qualität gewinnt', async () => {
+  const w = startWorker(multiTypeFetch(), { playerTypes: ['embed', 'popout', 'autoplay'] });
+  await self.fetch('https://usher.ttvnw.net/api/v2/channel/hls/kanal.m3u8');
+  const out = await (await self.fetch('https://x.ttvnw.net/v1/playlist/MAIN.m3u8')).text();
+  await wait(50);
+  assert.ok(out.includes('https://autoplay/b.ts'), '720p (autoplay) statt 360p (popout)');
+  const ad = w.msgs.find((m) => m.type === 'ad');
+  assert.equal(ad.mode, 'backup');
+  assert.equal(ad.quality, '720p');
+  assert.ok(w.logs().includes('backupHasAds'), 'embed mit Werbung erkannt');
+});
+
+test('Selbsttest: misst alle Player-Typen und nennt den besten werbefreien', async () => {
+  const w = startWorker(multiTypeFetch(), { playerTypes: ['embed', 'popout', 'autoplay'] });
+  await self.fetch('https://usher.ttvnw.net/api/v2/channel/hls/kanal.m3u8');
+  w.bc.postMessage({ tabId: 't', type: 'selftest' });
+  await wait(200);
+  const res = w.msgs.find((m) => m.type === 'selftest-result');
+  assert.deepEqual(res.backupAll.map((it) => [it.type, it.quality, it.hasAds]),
+    [['embed', '1080p', true], ['popout', '360p', false], ['autoplay', '720p', false]]);
+  assert.equal(res.backupType, 'autoplay');
+  assert.equal(res.backupQuality, '720p');
+  assert.equal(res.backupHasAds, false);
+});
+
 test('Selbsttest: Worker antwortet mit Stream-Liste und Ersatz-Stream', async () => {
   const w = startWorker(async (url) => {
     url = String(url);
@@ -189,4 +234,5 @@ test('Selbsttest: Worker antwortet mit Stream-Liste und Ersatz-Stream', async ()
   assert.equal(res.backup, true);
   assert.equal(res.backupQuality, '1080p');
   assert.equal(res.backupHasAds, false);
+  assert.equal(res.backupAll.length, 1);
 });

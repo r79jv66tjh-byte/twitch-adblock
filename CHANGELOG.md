@@ -3,6 +3,30 @@
 🇬🇧 English / 🇩🇪 Deutsch – each entry is listed in both languages.
 Format: [Keep a Changelog](https://keepachangelog.com/), versions: [SemVer](https://semver.org/).
 
+## [2.2.0] - 2026-10-17
+
+**EN**
+- **Glass design ("Liquid Glass"):** box, panel and notices are see-through with blur behind them, a light glossy edge and soft transitions. On by default; Settings → Display → Glass design switches back to the classic opaque look.
+- **Better replacement stream quality:** all player types (embed, site, popout, picture-by-picture, autoplay, frontpage) are checked and the ad-free one with the best quality is used, instead of the first ad-free one. Failed requests are cached for 4 min so Twitch isn't asked again on every playlist fetch.
+- **Self-test** lists every player type with quality and ad status (e.g. "embed 1080p ✗ · popout 360p ✓"), also in the log.
+- **Minimal layout:** the top row only shows "🛡 42 · 1 h 13 min" and ▾. The panel has three tiles (today · total · saved) and an icon bar: 📊 statistics · 🛟 emergency mode · 🔒 lock · 🐞 help · ⚙ settings – only one area open at a time. Hovering over an icon shows what it does.
+- **Hidden dev mode:** click 🐞 five times quickly – then the 🛠 tab appears with status, timestamp/slipped through/sync, self-test, logs and tools (yellow dot = current problem). The dev mode switch in the settings has been removed.
+- **Ad status in the top row** instead of pop-ups ("⏳ Ad · replacement 720p", then "✓ 45 s saved"); pop-ups only when the ad is cut out or in fullscreen.
+- **Quality of life:** Esc / click outside closes the panel, Alt + A opens/closes it; the box snaps to the window edges, double-click 🛡 = default position; tiles can be switched (today ↔ 7 days, saved total ↔ today); weekly recap; accent colour (purple, blue, green, pink); mini mode; full box only on channel pages; "Reset settings".
+- **Quick guide** (`QUICKSTART.md` / `QUICKSTART.de.md`) and **screenshots** in the README (EN and DE).
+- 2 new tests (12 in total).
+
+**DE**
+- **Glas-Design („Liquid Glass“):** Box, Panel und Hinweise sind durchsichtig mit Unschärfe dahinter, mit hellem Glanzrand und weichen Übergängen. Standardmäßig an; Einstellungen → Anzeige → Glas-Design schaltet auf den klassischen, deckenden Look zurück.
+- **Bessere Qualität des Ersatz-Streams:** Alle Player-Typen (embed, site, popout, picture-by-picture, autoplay, frontpage) werden geprüft und der werbefreie mit der besten Qualität genommen statt des ersten werbefreien. Fehlgeschlagene Anfragen werden 4 min gemerkt, damit Twitch nicht bei jedem Playlist-Abruf erneut gefragt wird.
+- **Selbsttest** zeigt jeden Player-Typ mit Qualität und Werbe-Status (z. B. „embed 1080p ✗ · popout 360p ✓“), auch im Protokoll.
+- **Schlichter Aufbau:** Die Kopfzeile zeigt nur noch „🛡 42 · 1 h 13 min“ und ▾. Das Panel hat drei Kacheln (heute · gesamt · gespart) und eine Icon-Leiste: 📊 Statistik · 🛟 Notfall-Modus · 🔒 Sperren · 🐞 Hilfe · ⚙ Einstellungen – immer nur ein Bereich offen. Mit der Maus über einem Icon erscheint, was es ist.
+- **Versteckter Dev-Modus:** 5× schnell auf 🐞 klicken – dann erscheint der Reiter 🛠 mit Status, Zeitstempel/Durchgerutscht/Sync, Selbsttest, Protokollen und Werkzeugen (gelber Punkt = aktuelles Problem). Der Dev-Schalter in den Einstellungen entfällt.
+- **Werbe-Status in der Kopfzeile** statt Pop-ups („⏳ Werbung · Ersatz 720p“, danach „✓ 45 s gespart“); Pop-ups nur noch, wenn herausgeschnitten wird, oder im Vollbild.
+- **Komfort:** Esc / Klick außerhalb schließt das Panel, Alt + A öffnet/schließt es; die Box rastet an den Fensterrändern ein, Doppelklick auf 🛡 = Standardposition; Kacheln umschaltbar (heute ↔ 7 Tage, gespart gesamt ↔ heute); Wochen-Rückblick; Akzentfarbe (Lila, Blau, Grün, Pink); Mini-Modus; volle Box nur auf Kanal-Seiten; „Einstellungen zurücksetzen“.
+- **Quickguide** (`QUICKSTART.md` / `QUICKSTART.de.md`) und **Screenshots** in der README (EN und DE).
+- 2 neue Tests (insgesamt 12).
+
 ## [2.1.3] - 2026-10-17
 
 - EN: Self-test checks all player types (embed, popout, autoplay) like the blocker and shows which one is ad-free

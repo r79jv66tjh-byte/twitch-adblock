@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Adblock (Stream + Banner)
 // @namespace    local.twitch-adblock
-// @version      2.1.3
+// @version      2.2.0
 // @description  Bypasses pre-/mid-roll ads in the Twitch stream (playlist swap) and hides ad banners. Ad counter with time saved, emergency mode, DE/EN.
 // @description:de Umgeht Pre-/Mid-Roll-Werbung im Twitch-Stream (Playlist-Austausch) und blendet Werbebanner aus. Werbe-Zähler mit gesparter Zeit, Notfall-Modus, DE/EN.
 // @license      MIT
@@ -24,8 +24,9 @@
   // Einstellungen
   // ---------------------------------------------------------------------------
   const CONFIG = {
-    // Player-Typen, über die ein werbefreier Ersatz-Stream angefragt wird (Reihenfolge = Priorität)
-    playerTypes: ['embed', 'popout', 'autoplay'],
+    // Player-Typen, über die ein werbefreier Ersatz-Stream angefragt wird
+    // (alle werden probiert, der werbefreie mit der besten Qualität gewinnt; bei Gleichstand die Reihenfolge)
+    playerTypes: ['embed', 'site', 'popout', 'picture-by-picture', 'autoplay', 'frontpage'],
     // Öffentliche Client-ID des Twitch-Webplayers
     clientId: 'kimne78kx3ncx6brgo4mv6wki5h1ko',
     // Standardwerte der Einstellungen (änderbar im Panel unter ⚙)
@@ -45,6 +46,12 @@
       vod: false,        // Werbung in Aufzeichnungen filtern (experimentell)
       preferQuality: false, // Ersatz-Stream nur in voller Qualität, sonst herausschneiden
       fadeIdle: true,    // Box im Leerlauf blass
+      glass: true,       // Glas-Design (aus = klassisch, deckend)
+      accent: 'purple',  // Akzentfarbe: purple | blue | green | pink
+      mini: false,       // zugeklappt nur ein kleines 🛡
+      onlyChannel: true, // außerhalb von Kanal-Seiten nur das kleine 🛡
+      autoClose: true,   // Panel mit Esc / Klick außerhalb schließen
+      weekly: true,      // Wochen-Rückblick
     },
     channelName: 'ttv-adblock',
     // Damit mehrere offene Twitch-Tabs sich nicht gegenseitig mitzählen
@@ -254,40 +261,53 @@
       }
     }
 
+    // Ersatz-Stream eines Player-Typs (4 min zwischengespeichert, auch Fehlschläge, damit Twitch nicht
+    // bei jedem Playlist-Abruf erneut gefragt wird)
+    async function getBackupEntry(channel, playerType) {
+      const key = channel + '|' + playerType;
+      let entry = backupCache.get(key);
+      if (!entry || Date.now() - entry.time > 4 * 60 * 1000) {
+        entry = (await createBackup(channel, playerType)) || { variants: [], time: Date.now(), hasAds: false, failed: true };
+        backupCache.set(key, entry);
+      }
+      return entry;
+    }
+
+    // Probiert alle Player-Typen und nimmt den werbefreien mit der besten Qualität
     async function getBackupPlaylist(info) {
+      const wanted = height(info.res);
+      let best = null;
       for (const playerType of cfg.playerTypes) {
-        const key = info.channel + '|' + playerType;
-        let entry = backupCache.get(key);
-        if (entry && entry.hasAds) continue;
-        if (!entry || Date.now() - entry.time > 4 * 60 * 1000) {
-          entry = await createBackup(info.channel, playerType);
-          if (!entry) continue;
-          backupCache.set(key, entry);
-        }
+        const entry = await getBackupEntry(info.channel, playerType);
+        if (entry.hasAds) continue;
         const variant = pickVariant(entry.variants, info);
         if (!variant) continue;
+        const h = height(variant.res);
         const q = quality(variant.res);
+        if (best && h <= best.h) continue; // kann nicht besser werden
         // Option „nur volle Qualität“: schlechteren Ersatz-Stream nicht nehmen, lieber herausschneiden
-        if (cfg.preferQuality && info.res && height(variant.res) < height(info.res)) {
+        if (cfg.preferQuality && wanted && h < wanted) {
           logOnce('backupLowQuality|' + playerType, 'info', 'backupLowQuality', { playerType, quality: q, wanted: quality(info.res) });
           continue;
         }
         try {
           const r = await realFetch(variant.url);
-          if (!r.ok) { backupCache.delete(key); continue; }
+          if (!r.ok) { backupCache.delete(info.channel + '|' + playerType); continue; }
           const text = await r.text();
           if (hasAds(text)) {
             entry.hasAds = true;
             logOnce('backupHasAds|' + playerType, 'info', 'backupHasAds', { playerType });
             continue;
           }
-          logOnce('backupOk|' + playerType, 'info', 'backupOk', { playerType, quality: q });
-          return { text, quality: q };
+          best = { text, quality: q, h, playerType };
+          if (!wanted || h >= wanted) break; // gewünschte Qualität erreicht
         } catch (e) {
-          backupCache.delete(key);
+          backupCache.delete(info.channel + '|' + playerType);
         }
       }
-      return null;
+      if (!best) return null;
+      logOnce('backupOk|' + best.playerType, 'info', 'backupOk', { playerType: best.playerType, quality: best.quality });
+      return { text: best.text, quality: best.quality };
     }
 
     function rebuild(res, text) {
@@ -395,23 +415,29 @@
     async function selfTest() {
       const result = { type: 'selftest-result', usherPath, channel: lastChannel, streamsKnown: streams.size > 0 };
       if (lastChannel) {
-        // wie der Blocker: Player-Typen der Reihe nach, bis einer werbefrei ist
+        // alle Player-Typen messen; Ergebnis = werbefreier Typ mit der besten Qualität (wie der Blocker)
+        result.backupAll = [];
+        let best = null;
         for (const playerType of cfg.playerTypes) {
           const entry = await createBackup(lastChannel, playerType);
-          if (!entry || !entry.variants.length) continue;
-          result.backup = true;
+          if (!entry || !entry.variants.length) { result.backupAll.push({ type: playerType, ok: false }); continue; }
           let ads = null;
           try {
             const r = await realFetch(entry.variants[0].url);
             ads = r.ok ? hasAds(await r.text()) : null;
           } catch (e) { ads = null; }
-          result.backupQuality = quality(entry.variants[0].res);
-          result.backupVariants = entry.variants.length;
-          result.backupHasAds = ads;
-          result.backupType = playerType;
-          if (ads === false) break;
+          const item = { type: playerType, ok: true, quality: quality(entry.variants[0].res), variants: entry.variants.length, hasAds: ads, h: height(entry.variants[0].res) };
+          result.backupAll.push(item);
+          const score = (it) => (it.hasAds === false ? 100000 : 0) + it.h;
+          if (!best || score(item) > score(best)) best = item;
         }
-        if (!result.backup) result.backup = false;
+        result.backup = !!best;
+        if (best) {
+          result.backupQuality = best.quality;
+          result.backupVariants = best.variants;
+          result.backupHasAds = best.hasAds;
+          result.backupType = best.type;
+        }
       }
       notify(result);
     }
@@ -475,6 +501,10 @@
   // Werbebanner / Overlays auf der Seite ausblenden
   // ---------------------------------------------------------------------------
   const CSS = `
+    html { --ttv-acc: 145, 70, 255; --ttv-acc-l: 191, 148, 255; --ttv-acc-d: 80, 40, 150; --ttv-tint: 60, 40, 90; }
+    html.ttv-ab-acc-blue { --ttv-acc: 59, 130, 246; --ttv-acc-l: 147, 197, 253; --ttv-acc-d: 30, 64, 175; --ttv-tint: 28, 44, 88; }
+    html.ttv-ab-acc-green { --ttv-acc: 16, 185, 129; --ttv-acc-l: 110, 231, 183; --ttv-acc-d: 6, 95, 70; --ttv-tint: 18, 66, 54; }
+    html.ttv-ab-acc-pink { --ttv-acc: 236, 72, 153; --ttv-acc-l: 249, 168, 212; --ttv-acc-d: 157, 23, 77; --ttv-tint: 88, 30, 62; }
     [data-a-target="video-ad-label"],
     [data-a-target="video-ad-countdown"],
     [data-a-target="ax-overlay"],
@@ -492,14 +522,14 @@
     #ttv-adblock-counter {
       position: fixed; z-index: 99999; left: 12px; top: 0;
       border-radius: 12px; max-width: calc(100vw - 8px);
-      background: rgba(24, 24, 27, 0.92); color: #bf94ff;
-      border: 1px solid rgba(145, 70, 255, 0.6);
+      background: rgba(24, 24, 27, 0.92); color: rgb(var(--ttv-acc-l));
+      border: 1px solid rgba(var(--ttv-acc), 0.6);
       font: 600 12px/1.3 system-ui, sans-serif;
       user-select: none; opacity: .8;
     }
     #ttv-adblock-counter:hover, #ttv-adblock-counter.expanded { opacity: 1; }
     #ttv-adblock-counter.expanded { width: 330px; border-radius: 10px; }
-    #ttv-adblock-counter.locked { border-color: rgba(145, 70, 255, 0.25); }
+    #ttv-adblock-counter.locked { border-color: rgba(var(--ttv-acc), 0.25); }
     #ttv-adblock-counter .ttv-ab-head {
       display: flex; align-items: center; gap: 4px;
       padding: 4px 6px 4px 9px; cursor: grab; touch-action: none;
@@ -512,30 +542,95 @@
       all: unset; cursor: pointer; line-height: 1; border-radius: 6px;
     }
     #ttv-adblock-counter .ttv-ab-icon { font-size: 12px; padding: 2px 4px; }
-    #ttv-adblock-counter .ttv-ab-icon:hover { background: rgba(145, 70, 255, 0.35); }
+    #ttv-adblock-counter .ttv-ab-icon:hover { background: rgba(var(--ttv-acc), 0.35); }
     #ttv-adblock-counter .ttv-ab-panel {
       display: none; padding: 4px 10px 10px; color: #efeff1; font-weight: 400;
-      border-top: 1px solid rgba(145, 70, 255, 0.3);
+      border-top: 1px solid rgba(var(--ttv-acc), 0.3);
     }
-    #ttv-adblock-counter.expanded .ttv-ab-panel { display: block; max-height: calc(100vh - 60px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: rgba(145, 70, 255, 0.6) transparent; }
+    #ttv-adblock-counter.expanded .ttv-ab-panel { display: block; max-height: calc(100vh - 60px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: rgba(var(--ttv-acc), 0.6) transparent; }
     #ttv-adblock-counter .ttv-ab-panel::-webkit-scrollbar { width: 8px; }
-    #ttv-adblock-counter .ttv-ab-panel::-webkit-scrollbar-thumb { background: rgba(145, 70, 255, 0.6); border-radius: 4px; }
+    #ttv-adblock-counter .ttv-ab-panel::-webkit-scrollbar-thumb { background: rgba(var(--ttv-acc), 0.6); border-radius: 4px; }
     #ttv-adblock-counter.expanded { display: flex; flex-direction: column; }
     #ttv-adblock-counter .ttv-ab-grip {
       display: none; height: 10px; flex: none; cursor: ns-resize; touch-action: none;
-      border-top: 1px solid rgba(145, 70, 255, 0.3); border-radius: 0 0 10px 10px;
+      border-top: 1px solid rgba(var(--ttv-acc), 0.3); border-radius: 0 0 10px 10px;
     }
     /* Box sitzt unten am Fensterrand: Griff oben, Ziehen nach oben = größer */
     #ttv-adblock-counter.grip-top .ttv-ab-grip {
-      order: -1; border-top: 0; border-bottom: 1px solid rgba(145, 70, 255, 0.3); border-radius: 10px 10px 0 0;
+      order: -1; border-top: 0; border-bottom: 1px solid rgba(var(--ttv-acc), 0.3); border-radius: 10px 10px 0 0;
     }
     #ttv-adblock-counter.expanded .ttv-ab-grip { display: flex; align-items: center; justify-content: center; }
-    #ttv-adblock-counter .ttv-ab-grip::after { content: ''; width: 36px; height: 3px; border-radius: 2px; background: rgba(191, 148, 255, 0.5); }
-    #ttv-adblock-counter .ttv-ab-grip:hover::after, #ttv-adblock-counter.resizing .ttv-ab-grip::after { background: #bf94ff; }
+    #ttv-adblock-counter .ttv-ab-grip::after { content: ''; width: 36px; height: 3px; border-radius: 2px; background: rgba(var(--ttv-acc-l), 0.5); }
+    #ttv-adblock-counter .ttv-ab-grip:hover::after, #ttv-adblock-counter.resizing .ttv-ab-grip::after { background: rgb(var(--ttv-acc-l)); }
+    #ttv-adblock-counter .ttv-ab-tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 8px 0 6px; }
+    #ttv-adblock-counter .ttv-ab-tile {
+      display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 7px 4px;
+      border-radius: 9px; background: rgba(255, 255, 255, 0.05);
+    }
+    #ttv-adblock-counter .ttv-ab-tile b { font-size: 18px; font-weight: 700; color: rgb(var(--ttv-acc-l)); white-space: nowrap; }
+    #ttv-adblock-counter .ttv-ab-tile b.good { color: #5fe0a5; }
+    #ttv-adblock-counter .ttv-ab-tile small { font-size: 10px; color: #adadb8; text-transform: uppercase; letter-spacing: .04em; }
+    #ttv-adblock-counter .ttv-ab-leaknote { font-size: 11px; color: #ff8a8a; text-align: center; margin: 2px 0 4px; }
+    #ttv-adblock-counter .ttv-ab-leaknote:empty { display: none; }
+    #ttv-adblock-counter .ttv-ab-toolbar {
+      display: flex; justify-content: space-between; gap: 4px; margin: 8px 0 2px; padding-top: 8px;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    #ttv-adblock-counter .ttv-ab-tool {
+      flex: 1; text-align: center; font-size: 15px; padding: 6px 0; border-radius: 9px;
+      transition: background .15s, opacity .15s;
+    }
+    #ttv-adblock-counter .ttv-ab-tool:hover { background: rgba(255, 255, 255, 0.1); }
+    #ttv-adblock-counter .ttv-ab-tool.active { background: rgba(var(--ttv-acc), 0.35); }
+    #ttv-adblock-counter .ttv-ab-devtool { position: relative; }
+    /* Beschriftung der Icons beim Überfahren */
+    #ttv-adblock-counter .ttv-ab-tool { position: relative; }
+    #ttv-adblock-counter .ttv-ab-emergency:hover { opacity: 1; filter: none; }
+    #ttv-adblock-counter .ttv-ab-tool[data-tip]::before {
+      content: attr(data-tip); position: absolute; left: 50%; bottom: calc(100% + 6px);
+      transform: translate(-50%, 4px); white-space: nowrap; pointer-events: none;
+      padding: 4px 8px; border-radius: 7px; font: 600 11px/1.2 system-ui, sans-serif; color: #fff;
+      background: rgba(20, 20, 26, 0.95); border: 1px solid rgba(var(--ttv-acc-l), 0.35);
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4); opacity: 0; transition: opacity .12s, transform .12s; z-index: 2;
+    }
+    #ttv-adblock-counter .ttv-ab-tool[data-tip]:hover::before,
+    #ttv-adblock-counter .ttv-ab-tool[data-tip]:focus-visible::before { opacity: 1; transform: translate(-50%, 0); }
+    /* ganz außen nicht über den Rand der Box hinausragen */
+    #ttv-adblock-counter .ttv-ab-toolbar > .ttv-ab-tool:first-child::before { left: 0; transform: translate(0, 4px); }
+    #ttv-adblock-counter .ttv-ab-toolbar > .ttv-ab-tool:first-child:hover::before { transform: translate(0, 0); }
+    #ttv-adblock-counter .ttv-ab-toolbar > .ttv-ab-tool:last-child::before { left: auto; right: 0; transform: translate(0, 4px); }
+    #ttv-adblock-counter .ttv-ab-toolbar > .ttv-ab-tool:last-child:hover::before { transform: translate(0, 0); }
+    #ttv-adblock-counter .ttv-ab-head > .ttv-ab-shield { flex: none; cursor: pointer; padding-right: 2px; }
+    #ttv-adblock-counter .ttv-ab-tile.switch { cursor: pointer; transition: background .15s; }
+    #ttv-adblock-counter .ttv-ab-tile.switch:hover { background: rgba(255, 255, 255, 0.12); }
+    /* Mini-Modus: zugeklappt nur 🛡, Rest unter der Maus oder während einer Werbepause */
+    #ttv-adblock-counter.mini:not(:hover):not(.status) .ttv-ab-text,
+    #ttv-adblock-counter.mini:not(:hover) .ttv-ab-toggle { display: none; }
+    #ttv-adblock-counter.mini:not(:hover):not(.status) .ttv-ab-head { padding: 4px 8px; }
+    /* Werbepause läuft: Kopfzeile leuchtet; danach kurz grün */
+    #ttv-adblock-counter.adlive { border-color: rgba(var(--ttv-acc-l), 0.9); animation: ttv-ab-pulse 1.6s ease-in-out infinite; opacity: 1; }
+    #ttv-adblock-counter.addone .ttv-ab-text { color: #5fe0a5; }
+    #ttv-adblock-counter.addone { opacity: 1; }
+    @keyframes ttv-ab-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(var(--ttv-acc), 0.0), 0 8px 32px rgba(0, 0, 0, 0.35); }
+      50% { box-shadow: 0 0 0 4px rgba(var(--ttv-acc), 0.35), 0 8px 32px rgba(0, 0, 0, 0.35); }
+    }
+    #ttv-adblock-counter.snapping { transition: left .2s ease-out, top .2s ease-out, opacity .6s !important; }
+    #ttv-adblock-counter.status { opacity: 1 !important; }
+    #ttv-adblock-counter .ttv-ab-devtool.alert::after {
+      content: ''; position: absolute; top: 4px; right: 22%; width: 7px; height: 7px; border-radius: 50%;
+      background: #ffb400; box-shadow: 0 0 0 2px rgba(24, 24, 27, 0.8);
+    }
+    #ttv-adblock-counter .ttv-ab-devcard {
+      margin: 6px 0; padding: 6px 8px; border-radius: 9px; background: rgba(255, 255, 255, 0.05);
+    }
+    #ttv-adblock-counter .ttv-ab-devcard .ttv-ab-stats { margin: 0 0 4px; }
+    #ttv-adblock-counter .ttv-ab-devcard .ttv-ab-muted { margin: 2px 0 0; }
+    #ttv-adblock-counter .ttv-ab-danger button:hover { background: rgba(235, 4, 0, 0.3) !important; }
     #ttv-adblock-counter .ttv-ab-stats {
       display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; margin: 6px 0;
     }
-    #ttv-adblock-counter .ttv-ab-stats b { font-weight: 600; text-align: right; color: #bf94ff; }
+    #ttv-adblock-counter .ttv-ab-stats b { font-weight: 600; text-align: right; color: rgb(var(--ttv-acc-l)); }
     #ttv-adblock-counter .ttv-ab-stats b.bad { color: #ff8a8a; }
     #ttv-adblock-counter .ttv-ab-stats b.good { color: #5fe0a5; }
     #ttv-adblock-counter .ttv-ab-issue:empty { display: none; }
@@ -567,15 +662,15 @@
     #ttv-adblock-counter .ttv-ab-fold.open { display: block; }
     #ttv-adblock-counter .ttv-ab-chart { display: flex; gap: 4px; align-items: flex-end; height: 74px; margin: 4px 0 6px; }
     #ttv-adblock-counter .ttv-ab-bar { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; height: 100%; }
-    #ttv-adblock-counter .ttv-ab-bar b { font-size: 10px; color: #bf94ff; }
+    #ttv-adblock-counter .ttv-ab-bar b { font-size: 10px; color: rgb(var(--ttv-acc-l)); }
     #ttv-adblock-counter .ttv-ab-bar small { font-size: 10px; color: #adadb8; }
     #ttv-adblock-counter .ttv-ab-barbox { flex: 1; width: 100%; display: flex; align-items: flex-end; background: rgba(255, 255, 255, 0.04); border-radius: 3px; }
-    #ttv-adblock-counter .ttv-ab-barbox i { display: block; width: 100%; min-height: 1px; background: #9146ff; border-radius: 3px; }
+    #ttv-adblock-counter .ttv-ab-barbox i { display: block; width: 100%; min-height: 1px; background: rgb(var(--ttv-acc)); border-radius: 3px; }
     #ttv-adblock-counter .ttv-ab-events { max-height: 160px; }
     #ttv-adblock-counter .ttv-ab-events li.lvl-warn { color: #ffd37a; }
     #ttv-adblock-counter .ttv-ab-events li.lvl-error { color: #ffb3b3; }
     #ttv-adblock-counter .ttv-ab-footer { margin-top: 8px; font-size: 10px; color: #adadb8; text-align: center; }
-    #ttv-adblock-counter .ttv-ab-footer a { color: #bf94ff; text-decoration: none; }
+    #ttv-adblock-counter .ttv-ab-footer a { color: rgb(var(--ttv-acc-l)); text-decoration: none; }
     #ttv-adblock-counter .ttv-ab-footer a:hover { text-decoration: underline; }
     html.ttv-ab-hide-turbo a[href*="/turbo"],
     html.ttv-ab-hide-turbo [data-a-target*="turbo"],
@@ -589,11 +684,11 @@
     #ttv-adblock-counter .ttv-ab-setting {
       display: flex; align-items: flex-start; gap: 8px; padding: 4px 0; font-size: 12px; cursor: pointer;
     }
-    #ttv-adblock-counter .ttv-ab-setting input { margin: 1px 0 0; accent-color: #9146ff; cursor: pointer; }
+    #ttv-adblock-counter .ttv-ab-setting input { margin: 1px 0 0; accent-color: rgb(var(--ttv-acc)); cursor: pointer; }
     #ttv-adblock-counter .ttv-ab-setting small { display: block; color: #adadb8; font-size: 10px; }
     #ttv-adblock-counter .ttv-ab-lang { align-items: center; justify-content: space-between; cursor: default; }
     #ttv-adblock-counter .ttv-ab-lang select {
-      background: #18181b; color: #efeff1; border: 1px solid rgba(145, 70, 255, 0.6);
+      background: #18181b; color: #efeff1; border: 1px solid rgba(var(--ttv-acc), 0.6);
       border-radius: 6px; padding: 2px 4px; font-size: 12px;
     }
     #ttv-adblock-counter .ttv-ab-muted { color: #adadb8; font-size: 11px; margin: 4px 0; }
@@ -605,8 +700,8 @@
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
       border: 1px solid transparent; transition: background .15s, border-color .15s;
     }
-    #ttv-adblock-counter .ttv-ab-stamp { background: rgba(145, 70, 255, 0.3); border-color: rgba(145, 70, 255, 0.7) !important; }
-    #ttv-adblock-counter .ttv-ab-stamp:hover { background: rgba(145, 70, 255, 0.5); }
+    #ttv-adblock-counter .ttv-ab-stamp { background: rgba(var(--ttv-acc), 0.3); border-color: rgba(var(--ttv-acc), 0.7) !important; }
+    #ttv-adblock-counter .ttv-ab-stamp:hover { background: rgba(var(--ttv-acc), 0.5); }
     #ttv-adblock-counter .ttv-ab-leak { background: rgba(235, 4, 0, 0.25); border-color: rgba(255, 90, 90, 0.6) !important; }
     #ttv-adblock-counter .ttv-ab-leak:hover { background: rgba(235, 4, 0, 0.4); }
     #ttv-adblock-counter .ttv-ab-sync {
@@ -647,7 +742,7 @@
     #ttv-adblock-notice {
       position: fixed; z-index: 99999; left: 12px; top: 0;
       padding: 8px 12px; border-radius: 6px;
-      background: rgba(145, 70, 255, 0.92); color: #fff;
+      background: rgba(var(--ttv-acc), 0.92); color: #fff;
       font: 600 13px/1.3 system-ui, sans-serif;
       pointer-events: none; transition: opacity .3s; opacity: 0;
     }
@@ -659,11 +754,75 @@
     }
     #ttv-adblock-counter { transition: opacity .6s; }
     #ttv-adblock-counter.idle:not(:hover):not(.expanded) { opacity: .25; }
-    #ttv-adblock-counter .ttv-ab-selftest { text-align: center; color: #efeff1; background: rgba(145, 70, 255, 0.25); }
+    #ttv-adblock-counter .ttv-ab-selftest { text-align: center; color: #efeff1; background: rgba(var(--ttv-acc), 0.25); }
     #ttv-adblock-counter .ttv-ab-selftest[disabled] { opacity: .6; cursor: progress; }
     #ttv-adblock-counter .ttv-ab-selftest-list { max-height: none; }
     #ttv-adblock-counter .ttv-ab-selftest-list li.ok { color: #5fe0a5; }
     #ttv-adblock-counter .ttv-ab-selftest-list li.fail { color: #ffb3b3; }
+
+    /* ---- Glas-Design („Liquid Glass“), Einstellung „Glas-Design“ ---- */
+    html.ttv-ab-glass #ttv-adblock-counter {
+      background: linear-gradient(135deg, rgba(var(--ttv-tint), 0.42), rgba(18, 18, 24, 0.5));
+      -webkit-backdrop-filter: blur(18px) saturate(170%);
+      backdrop-filter: blur(18px) saturate(170%);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 16px;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), inset 0 -1px 0 rgba(255, 255, 255, 0.05), 0 8px 32px rgba(0, 0, 0, 0.45);
+      color: #f1e6ff; opacity: .92;
+      transition: opacity .6s, background .3s, box-shadow .3s, border-radius .3s;
+    }
+    /* Glanzkante oben */
+    html.ttv-ab-glass #ttv-adblock-counter::before {
+      content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+      background: linear-gradient(160deg, rgba(255, 255, 255, 0.22) 0%, rgba(var(--ttv-acc-l), 0.10) 28%, transparent 55%);
+    }
+    html.ttv-ab-glass #ttv-adblock-counter > * { position: relative; }
+    html.ttv-ab-glass #ttv-adblock-counter:hover { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 10px 36px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(var(--ttv-acc-l), 0.35); }
+    html.ttv-ab-glass #ttv-adblock-counter.expanded {
+      border-radius: 14px;
+      background: linear-gradient(160deg, rgba(var(--ttv-tint), 0.72), rgba(14, 14, 20, 0.78));
+    }
+    html.ttv-ab-glass #ttv-adblock-counter.locked { border-color: rgba(255, 255, 255, 0.1); }
+    html.ttv-ab-glass #ttv-adblock-counter .ttv-ab-head { text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); }
+    html.ttv-ab-glass #ttv-adblock-counter .ttv-ab-panel { border-top-color: rgba(255, 255, 255, 0.12); }
+    html.ttv-ab-glass #ttv-adblock-counter .ttv-ab-grip { border-color: rgba(255, 255, 255, 0.12); }
+    html.ttv-ab-glass #ttv-adblock-counter .ttv-ab-icon:hover { background: rgba(255, 255, 255, 0.16); }
+    html.ttv-ab-glass #ttv-adblock-counter .ttv-ab-wide,
+    html.ttv-ab-glass #ttv-adblock-counter .ttv-ab-actions button {
+      background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.12);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12); border-radius: 9px;
+      transition: background .2s, border-color .2s, transform .15s;
+    }
+    html.ttv-ab-glass #ttv-adblock-counter .ttv-ab-wide:hover,
+    html.ttv-ab-glass #ttv-adblock-counter .ttv-ab-actions button:hover { background: rgba(255, 255, 255, 0.16); border-color: rgba(255, 255, 255, 0.24); }
+    html.ttv-ab-glass #ttv-adblock-counter button:active { transform: scale(.97); }
+    html.ttv-ab-glass #ttv-adblock-counter .ttv-ab-reportrow button { border-radius: 9px; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.15); }
+    html.ttv-ab-glass #ttv-adblock-counter .ttv-ab-selftest { background: rgba(var(--ttv-acc), 0.3); }
+    html.ttv-ab-glass #ttv-adblock-counter .ttv-ab-tile {
+      background: rgba(255, 255, 255, 0.07); border: 1px solid rgba(255, 255, 255, 0.1);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    }
+    html.ttv-ab-glass #ttv-adblock-counter .ttv-ab-tile b { text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4); }
+    html.ttv-ab-glass #ttv-adblock-counter .ttv-ab-toolbar { border-top-color: rgba(255, 255, 255, 0.12); }
+    html.ttv-ab-glass #ttv-adblock-counter .ttv-ab-tool.active { background: rgba(var(--ttv-acc-l), 0.28); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2); }
+    html.ttv-ab-glass #ttv-adblock-counter .ttv-ab-issue { border-radius: 9px; }
+    html.ttv-ab-glass #ttv-adblock-counter .ttv-ab-lang select { background: rgba(0, 0, 0, 0.35); border-color: rgba(255, 255, 255, 0.2); }
+    html.ttv-ab-glass #ttv-adblock-counter .ttv-ab-barbox { background: rgba(255, 255, 255, 0.07); }
+    html.ttv-ab-glass #ttv-adblock-counter .ttv-ab-barbox i { background: linear-gradient(180deg, rgb(var(--ttv-acc-l)), rgb(var(--ttv-acc))); }
+    html.ttv-ab-glass #ttv-adblock-counter.idle:not(:hover):not(.expanded) { opacity: .3; }
+    html.ttv-ab-glass #ttv-adblock-notice {
+      background: linear-gradient(135deg, rgba(var(--ttv-acc), 0.62), rgba(var(--ttv-acc-d), 0.55));
+      -webkit-backdrop-filter: blur(16px) saturate(170%);
+      backdrop-filter: blur(16px) saturate(170%);
+      border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 14px;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 8px 28px rgba(0, 0, 0, 0.4);
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+    }
+    /* Browser ohne Unschärfe-Effekt: deckender Hintergrund, damit der Text lesbar bleibt */
+    @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+      html.ttv-ab-glass #ttv-adblock-counter { background: rgba(28, 24, 38, 0.95); }
+      html.ttv-ab-glass #ttv-adblock-notice { background: rgba(var(--ttv-acc), 0.92); }
+    }
   `;
 
   function injectCss() {
@@ -679,7 +838,7 @@
   // Zähler-Box mit Panel, Melde-Funktion, Statistik und Einstellungen
   // (alles im localStorage von twitch.tv gespeichert)
   // ---------------------------------------------------------------------------
-  const VERSION = '2.1.3';
+  const VERSION = '2.2.0';
   const REPO_URL = 'https://github.com/r79jv66tjh-byte/twitch-adblock';
   const RAW_URL = 'https://raw.githubusercontent.com/r79jv66tjh-byte/twitch-adblock/main/twitch-adblock.user.js';
   const ISSUE_URL = REPO_URL + '/issues/new?template=bug_report.yml';
@@ -693,13 +852,14 @@
   const UPDATE_KEY = 'ttvAdblockUpdate';
   const SEEN_KEY = 'ttvAdblockSeenVersion';
   const RELOAD_KEY = 'ttvAdblockLastReload';
+  const WEEKLY_KEY = 'ttvAdblockWeekly';
   const MAX_REPORTS = 100;
   const MAX_EVENTS = 200;
 
   // Kurzinfo „Was ist neu“ zur aktuellen Version
   const WHATS_NEW = {
-    de: 'Behebt Hängen und Flackern bei Werbung (mehrere Playlists gleichzeitig), keine Doppelzählung mehr, schnellere Bild-Reparatur nach Werbepausen',
-    en: 'fixes freezing and flickering during ads (several playlists at once), no more double counting, faster picture repair after ad breaks',
+    de: 'Neuer schlichter Aufbau im Glas-Design mit Icon-Leiste (Maus drüber = Beschriftung), Werbe-Status in der Kopfzeile, Alt + A, Akzentfarbe, Ersatz-Stream in der besten werbefreien Qualität',
+    en: 'new minimal glass layout with an icon bar (hover = label), ad status in the top row, Alt + A, accent colour, replacement stream in the best ad-free quality',
   };
 
   // Datum in Ortszeit (für „Heute“ und den Verlauf)
@@ -737,6 +897,18 @@
   }
   const emptyStats = () => ({ total: 0, today: 0, leaked: 0, savedTotal: 0, savedToday: 0, day: today(), days: {}, channels: {} });
 
+  // Summe der letzten n Tage (ab heute rückwärts, optional ab einem anderen Starttag)
+  function sumDays(s, n, from) {
+    const out = { ads: 0, saved: 0 };
+    for (let i = 0; i < n; i++) {
+      const d = from ? new Date(from) : new Date();
+      d.setDate(d.getDate() - i);
+      const v = s.days[dayKey(d)];
+      if (v) { out.ads += v.ads || 0; out.saved += v.saved || 0; }
+    }
+    return out;
+  }
+
   function bump(s, channel, field, amount) {
     const d = s.days[today()] || (s.days[today()] = { ads: 0, saved: 0 });
     if (field !== 'leaked') d[field] = (d[field] || 0) + amount;
@@ -751,7 +923,10 @@
     return Array.isArray(r) ? r : [];
   }
 
-  const box = Object.assign({ x: null, y: null, locked: false, expanded: false, sync: false, settingsOpen: false, statsOpen: false }, loadJson(BOX_KEY, {}));
+  const box = Object.assign({ x: null, y: null, locked: false, expanded: false, sync: false, section: null }, loadJson(BOX_KEY, {}));
+  // Im Panel ist immer nur ein Bereich offen: 'stats' | 'settings' | 'help' | null
+  delete box.settingsOpen;
+  delete box.statsOpen;
   const saveBox = () => saveJson(BOX_KEY, box);
 
   // Einstellungen (ältere Versionen hatten den Notfall-Modus in der Box gespeichert)
@@ -769,8 +944,22 @@
   const TEXT = {
     de: {
       locale: 'de-DE',
-      headSaved: (n, d) => '🛡 ' + n + (n === 1 ? ' Werbepause · ' : ' Werbepausen · ') + d + ' gespart',
-      head: (n) => '🛡 ' + n + (n === 1 ? ' Werbepause blockiert' : ' Werbepausen blockiert'),
+      headSaved: (n, d) => n + ' · ' + d,
+      headFull: (n, d) => n + (n === 1 ? ' Werbepause blockiert · ' : ' Werbepausen blockiert · ') + d + ' gespart',
+      tileToday: 'heute',
+      tileTotal: 'gesamt',
+      tileSaved: 'gespart',
+      leakNote: (n) => '⚠ ' + n + ' durchgerutscht',
+      toolHelp: 'Hilfe: Fehler melden, nach Updates suchen',
+      tipStats: 'Statistik',
+      tipEmergencyOn: 'Notfall-Modus: an',
+      tipEmergencyOff: 'Notfall-Modus: aus',
+      tipLock: 'Box sperren',
+      tipUnlock: 'Box entsperren',
+      tipHelp: 'Hilfe & Fehler melden',
+      tipDev: 'Dev-Werkzeuge',
+      tipSettings: 'Einstellungen',
+      head: (n) => String(n),
       headLocked: 'Doppelklick = Details ein-/ausklappen',
       headDrag: 'Ziehen = verschieben, Doppelklick = Details ein-/ausklappen',
       statTab: 'Dieser Tab',
@@ -818,7 +1007,10 @@
       lockOff: 'Verschiebbar – klicken zum Sperren',
       expand: 'Details, Melden & Einstellungen',
       collapse: 'Einklappen',
-      devTitle: '🛠 Dev-Modus aktiv – klicken zum Ausschalten',
+      toolDev: 'Dev-Werkzeuge: Status, Selbsttest, Protokolle',
+      devOnNotice: '🛠 Dev-Modus an – Werkzeuge unter 🛠 (5× 🐞 = aus)',
+      devOffNotice: '🛠 Dev-Modus aus',
+      devTools: 'Werkzeuge',
       gripTitle: 'Ziehen = Höhe ändern, Doppelklick = halbe Fensterhöhe',
       noticeBackupQ: (q) => 'Werbung erkannt – werbefreier Ersatz-Stream aktiv (' + q + ')',
       selftestBtn: '🩺 Selbsttest',
@@ -833,6 +1025,9 @@
       stWorker: 'Video-Worker verbunden',
       stWorkerAnswer: 'Video-Worker antwortet',
       stTimeout: 'keine Antwort (Seite neu laden?)',
+      stBackupAll: 'Player-Typen (✓ werbefrei, ✗ Werbung, – nicht erhältlich)',
+      setGlass: 'Glas-Design',
+      setGlassHint: 'Durchsichtige Box mit Unschärfe dahinter (aus = klassisch, deckend)',
       stStream: 'Stream-Liste erkannt',
       stBackup: 'Ersatz-Stream von Twitch erhältlich',
       stBackupDetail: (q, n) => 'bis ' + q + ', ' + n + ' Qualitäten',
@@ -863,6 +1058,27 @@
       noticeRecover: 'Bild hängt – wird repariert …',
       noticeReload: 'Bild hängt weiterhin – Seite wird neu geladen …',
       whatsNew: (v, txt) => 'Aktualisiert auf ' + v + ' – Neu: ' + txt,
+      headAdBackup: (q) => '⏳ Werbung · Ersatz' + (q && q !== '?' ? ' ' + q : '-Stream'),
+      headAdStrip: '✂ Werbung wird herausgeschnitten',
+      headAdDone: (d) => '✓ ' + d + ' gespart',
+      tileWeek: '7 Tage',
+      tileSavedToday: 'heute gespart',
+      tileSwitch: 'Klicken zum Umschalten',
+      shieldTitle: 'Doppelklick = Box zurück an die Standardposition',
+      weeklyRecap: (n, d) => 'Letzte Woche: ' + n + (n === 1 ? ' Werbepause' : ' Werbepausen') + ' blockiert, ' + d + ' gespart',
+      setMini: 'Mini-Modus',
+      setMiniHint: 'Zugeklappt nur ein kleines 🛡 – Zahlen erscheinen unter der Maus',
+      setOnlyChannel: 'Nur auf Kanal-Seiten voll anzeigen',
+      setOnlyChannelHint: 'Auf Startseite, Kategorien usw. nur das kleine 🛡',
+      setAutoClose: 'Panel automatisch schließen',
+      setAutoCloseHint: 'Mit Esc oder einem Klick außerhalb der Box',
+      setWeekly: 'Wochen-Rückblick',
+      setWeeklyHint: 'Einmal pro Woche ein kurzer Hinweis mit den Zahlen der Vorwoche',
+      setAccent: 'Akzentfarbe',
+      accentNames: { purple: 'Lila', blue: 'Blau', green: 'Grün', pink: 'Pink' },
+      resetSettings: '↺ Einstellungen zurücksetzen',
+      resetSettingsTitle: 'Alle Einstellungen auf Standard – Zähler, Verlauf und Protokoll bleiben',
+      resetSettingsDone: 'Einstellungen zurückgesetzt',
       whatsNewLink: 'Was ist neu?',
       version: (v) => 'Twitch Adblock v' + v,
       statsBtn: '📊 Verlauf & Kanäle',
@@ -880,7 +1096,7 @@
       setCounter: 'Zahlen in der Box anzeigen',
       setCounterHint: 'Aus = nur das 🛡-Symbol',
       setDev: '🛠 Dev-Modus',
-      setDevHint: 'Zeigt Werkzeuge zur Fehlersuche: Ereignisse, Protokoll, Zeitstempel, Zurücksetzen',
+      setDevHint: 'Zeigt den Reiter 🛠 mit Werkzeugen zur Fehlersuche: Status, Selbsttest, Protokolle, Zurücksetzen',
       setAuto: 'Durchgerutschte Werbung automatisch protokollieren',
       setEmergency: 'Notfall-Modus (stumm & unscharf)',
       setRecover: 'Hängendes Bild automatisch reparieren',
@@ -888,7 +1104,7 @@
       setVod: 'Werbung in Aufzeichnungen (VODs) filtern',
       setVodHint: 'Experimentell – wirkt nach dem Neuladen der Seite',
       setShortcuts: 'Tastenkürzel',
-      setShortcutsHint: 'Alt+W = Durchgerutscht, Alt+Z = Zeitstempel',
+      setShortcutsHint: 'Alt+A = Panel auf/zu, Alt+W = Durchgerutscht, Alt+Z = Zeitstempel',
       setUpdate: 'Täglich nach Updates suchen',
       setHideTurbo: 'Turbo-Werbung ausblenden',
       setHidePrime: 'Prime-Gaming-Banner ausblenden',
@@ -946,7 +1162,7 @@
         backupHasAds: (d) => 'Ersatz-Stream (' + d.playerType + ') hat ebenfalls Werbung',
         backupOk: (d) => 'Werbefreier Ersatz-Stream aktiv (' + d.playerType + (d.quality ? ', ' + d.quality : '') + ')',
         backupLowQuality: (d) => 'Ersatz-Stream (' + d.playerType + ') nur ' + d.quality + ' statt ' + d.wanted + ' – übersprungen (Einstellung „nur volle Qualität“)',
-        selftest: (d) => 'Selbsttest: ' + d.ok + ' von ' + d.total + ' in Ordnung' + (d.failed ? ' – Probleme: ' + d.failed : ''),
+        selftest: (d) => 'Selbsttest: ' + d.ok + ' von ' + d.total + ' in Ordnung' + (d.failed ? ' – Probleme: ' + d.failed : '') + (d.types ? ' – Player-Typen: ' + d.types : ''),
         stripped: () => 'Kein werbefreier Ersatz-Stream – Werbung wird herausgeschnitten',
         vodAd: () => 'Werbung in Aufzeichnung (VOD) herausgeschnitten',
         playlistSeen: (d) => 'Player nutzt ' + (d.kind === 'master' ? 'Stream-Liste' : 'Playlist') + ': ' + d.url,
@@ -970,8 +1186,22 @@
     },
     en: {
       locale: 'en-GB',
-      headSaved: (n, d) => '🛡 ' + n + (n === 1 ? ' ad break · ' : ' ad breaks · ') + d + ' saved',
-      head: (n) => '🛡 ' + n + (n === 1 ? ' ad break blocked' : ' ad breaks blocked'),
+      headSaved: (n, d) => n + ' · ' + d,
+      headFull: (n, d) => n + (n === 1 ? ' ad break blocked · ' : ' ad breaks blocked · ') + d + ' saved',
+      tileToday: 'today',
+      tileTotal: 'total',
+      tileSaved: 'saved',
+      leakNote: (n) => '⚠ ' + n + ' slipped through',
+      toolHelp: 'Help: report a problem, check for updates',
+      tipStats: 'Statistics',
+      tipEmergencyOn: 'Emergency mode: on',
+      tipEmergencyOff: 'Emergency mode: off',
+      tipLock: 'Lock box',
+      tipUnlock: 'Unlock box',
+      tipHelp: 'Help & report a problem',
+      tipDev: 'Dev tools',
+      tipSettings: 'Settings',
+      head: (n) => String(n),
       headLocked: 'Double-click = show/hide details',
       headDrag: 'Drag = move, double-click = show/hide details',
       statTab: 'This tab',
@@ -1019,7 +1249,10 @@
       lockOff: 'Movable – click to lock',
       expand: 'Details, reporting & settings',
       collapse: 'Collapse',
-      devTitle: '🛠 Dev mode active – click to turn off',
+      toolDev: 'Dev tools: status, self-test, logs',
+      devOnNotice: '🛠 Dev mode on – tools under 🛠 (5× 🐞 = off)',
+      devOffNotice: '🛠 Dev mode off',
+      devTools: 'Tools',
       gripTitle: 'Drag = change height, double-click = half the window height',
       noticeBackupQ: (q) => 'Ad detected – ad-free replacement stream active (' + q + ')',
       selftestBtn: '🩺 Self-test',
@@ -1034,6 +1267,9 @@
       stWorker: 'Video worker connected',
       stWorkerAnswer: 'Video worker responds',
       stTimeout: 'no answer (reload the page?)',
+      stBackupAll: 'Player types (✓ ad-free, ✗ ads, – not available)',
+      setGlass: 'Glass design',
+      setGlassHint: 'See-through box with blur behind it (off = classic, opaque)',
       stStream: 'Stream list recognised',
       stBackup: 'Replacement stream available from Twitch',
       stBackupDetail: (q, n) => 'up to ' + q + ', ' + n + ' qualities',
@@ -1064,6 +1300,27 @@
       noticeRecover: 'Picture frozen – repairing …',
       noticeReload: 'Picture still frozen – reloading the page …',
       whatsNew: (v, txt) => 'Updated to ' + v + ' – new: ' + txt,
+      headAdBackup: (q) => '⏳ Ad · replacement' + (q && q !== '?' ? ' ' + q : ' stream'),
+      headAdStrip: '✂ Cutting out ad',
+      headAdDone: (d) => '✓ ' + d + ' saved',
+      tileWeek: '7 days',
+      tileSavedToday: 'saved today',
+      tileSwitch: 'Click to switch',
+      shieldTitle: 'Double-click = move the box back to its default position',
+      weeklyRecap: (n, d) => 'Last week: ' + n + (n === 1 ? ' ad break' : ' ad breaks') + ' blocked, ' + d + ' saved',
+      setMini: 'Mini mode',
+      setMiniHint: 'Collapsed box is just a small 🛡 – numbers appear under the mouse',
+      setOnlyChannel: 'Full box only on channel pages',
+      setOnlyChannelHint: 'Front page, categories etc. only show the small 🛡',
+      setAutoClose: 'Close the panel automatically',
+      setAutoCloseHint: 'With Esc or a click outside the box',
+      setWeekly: 'Weekly recap',
+      setWeeklyHint: 'A short notice once a week with last week\'s numbers',
+      setAccent: 'Accent colour',
+      accentNames: { purple: 'Purple', blue: 'Blue', green: 'Green', pink: 'Pink' },
+      resetSettings: '↺ Reset settings',
+      resetSettingsTitle: 'All settings back to default – counters, history and log are kept',
+      resetSettingsDone: 'Settings reset',
       whatsNewLink: "What's new?",
       version: (v) => 'Twitch Adblock v' + v,
       statsBtn: '📊 History & channels',
@@ -1081,7 +1338,7 @@
       setCounter: 'Show numbers in the box',
       setCounterHint: 'Off = only the 🛡 icon',
       setDev: '🛠 Dev mode',
-      setDevHint: 'Shows troubleshooting tools: events, log, timestamp, reset',
+      setDevHint: 'Shows the 🛠 tab with troubleshooting tools: status, self-test, logs, reset',
       setAuto: 'Log ads that slip through automatically',
       setEmergency: 'Emergency mode (mute & blur)',
       setRecover: 'Repair frozen picture automatically',
@@ -1089,7 +1346,7 @@
       setVod: 'Filter ads in recordings (VODs)',
       setVodHint: 'Experimental – takes effect after reloading the page',
       setShortcuts: 'Keyboard shortcuts',
-      setShortcutsHint: 'Alt+W = slipped through, Alt+Z = timestamp',
+      setShortcutsHint: 'Alt+A = open/close panel, Alt+W = slipped through, Alt+Z = timestamp',
       setUpdate: 'Check for updates daily',
       setHideTurbo: 'Hide Turbo ads',
       setHidePrime: 'Hide Prime Gaming banners',
@@ -1147,7 +1404,7 @@
         backupHasAds: (d) => 'Replacement stream (' + d.playerType + ') has ads as well',
         backupOk: (d) => 'Ad-free replacement stream active (' + d.playerType + (d.quality ? ', ' + d.quality : '') + ')',
         backupLowQuality: (d) => 'Replacement stream (' + d.playerType + ') only ' + d.quality + ' instead of ' + d.wanted + ' – skipped (setting "only full quality")',
-        selftest: (d) => 'Self-test: ' + d.ok + ' of ' + d.total + ' OK' + (d.failed ? ' – problems: ' + d.failed : ''),
+        selftest: (d) => 'Self-test: ' + d.ok + ' of ' + d.total + ' OK' + (d.failed ? ' – problems: ' + d.failed : '') + (d.types ? ' – player types: ' + d.types : ''),
         stripped: () => 'No ad-free replacement stream – ads are being cut out',
         vodAd: () => 'Ad in recording (VOD) cut out',
         playlistSeen: (d) => 'Player uses ' + (d.kind === 'master' ? 'stream list' : 'playlist') + ': ' + d.url,
@@ -1209,6 +1466,16 @@
   let lastAdEnd = 0;      // Zeitpunkt, an dem die letzte Werbepause endete
   const adBreak = { sources: new Set(), seconds: 0 }; // laufende Pause über alle Worker/Playlists
 
+  // Status in der Kopfzeile (statt Pop-up): { text, cls: 'live' | 'done', until }
+  let headStatus = null;
+  let headStatusTimer = null;
+  function setHeadStatus(text, cls, ms) {
+    clearTimeout(headStatusTimer);
+    headStatus = text ? { text, cls, until: ms ? Date.now() + ms : 0 } : null;
+    if (ms) headStatusTimer = setTimeout(() => { headStatus = null; renderCounter(); }, ms);
+    renderCounter();
+  }
+
   // Werbepause abschließen: einmal protokollieren, gesparte Zeit gutschreiben
   function finishAdBreak() {
     adBreak.sources.clear();
@@ -1217,7 +1484,9 @@
     const seconds = adBreak.seconds;
     logEvent('info', 'adBreak', { mode: lastAd ? lastAd.mode : null, seconds });
     addSavedTime(seconds);
-    if (seconds > 0) showNotice(t('noticeSaved')(fmtDur(seconds)), 4000);
+    setHeadStatus(seconds > 0 ? t('headAdDone')(fmtDur(seconds)) : null, 'done', 5000);
+    // Pop-up nur im Vollbild (dort ist die Box nicht sichtbar)
+    if (seconds > 0 && document.fullscreenElement) showNotice(t('noticeSaved')(fmtDur(seconds)), 4000);
     else showNotice(null);
   }
   let notice = null;
@@ -1311,17 +1580,24 @@
   }
   window.addEventListener('resize', () => { applyPanelHeight(); placeCounter(); });
 
+  // Beschriftung, die beim Überfahren eines Icons erscheint (statt des langsamen Browser-Tooltips)
+  function setTip(btn, text) {
+    btn.dataset.tip = text;
+    btn.setAttribute('aria-label', text);
+    btn.removeAttribute('title');
+  }
+
   function updateEmergency() {
     if (!ui.root) return;
     ui.emergency.classList.toggle('on', !!settings.emergency);
-    ui.emergency.title = settings.emergency ? t('emergencyOnTitle') : t('emergencyOffTitle');
+    setTip(ui.emergency, settings.emergency ? t('tipEmergencyOn') : t('tipEmergencyOff'));
     if (ui.inputs && ui.inputs.emergency) ui.inputs.emergency.checked = !!settings.emergency;
   }
 
   function updateLock() {
     ui.root.classList.toggle('locked', !!box.locked);
     ui.lock.textContent = box.locked ? '🔒' : '🔓';
-    ui.lock.title = box.locked ? t('lockOn') : t('lockOff');
+    setTip(ui.lock, box.locked ? t('tipUnlock') : t('tipLock'));
   }
 
   function updateSync() {
@@ -1350,9 +1626,22 @@
       if (!start) return;
       start = null;
       ui.root.classList.remove('dragging');
-      // tatsächliche (ggf. begrenzte) Position speichern
-      box.x = parseFloat(ui.root.style.left);
-      box.y = parseFloat(ui.root.style.top);
+      // tatsächliche (ggf. begrenzte) Position speichern; nah am Rand → an den Rand einrasten
+      const SNAP = 40;
+      const GAP = 12;
+      const w = ui.root.offsetWidth;
+      const h = ui.root.offsetHeight;
+      let x = parseFloat(ui.root.style.left);
+      let y = parseFloat(ui.root.style.top);
+      if (x < SNAP) x = GAP;
+      else if (window.innerWidth - (x + w) < SNAP) x = window.innerWidth - w - GAP;
+      if (y < SNAP) y = GAP;
+      else if (window.innerHeight - (y + h) < SNAP) y = window.innerHeight - h - GAP;
+      box.x = x;
+      box.y = y;
+      ui.root.classList.add('snapping');
+      placeCounter();
+      setTimeout(() => ui.root && ui.root.classList.remove('snapping'), 250);
       saveBox();
     };
     ui.head.addEventListener('pointerup', end);
@@ -1591,6 +1880,7 @@
 
   async function runSelfTest() {
     const results = [];
+    let typesLine = '';
     const add = (ok, label, detail) => results.push({ ok: !!ok, label, detail: detail || '' });
     const v = mainVideo();
     add(!!currentChannel(), t('stChannel'), currentChannel() || t('stNoChannel'));
@@ -1616,7 +1906,13 @@
       add(res.streamsKnown, t('stStream'), res.usherPath || '');
       if (res.channel) {
         add(res.backup, t('stBackup'), res.backup && res.backupQuality ? t('stBackupDetail')(res.backupQuality, res.backupVariants) : '');
-        if (res.backup) add(res.backupHasAds === false, t('stBackupAds'), res.backupHasAds === null ? '?' : (res.backupType || ''));
+        if (res.backup) add(res.backupHasAds === false, t('stBackupAds'), res.backupHasAds === null ? '?' : [res.backupType, res.backupQuality].filter(Boolean).join(' '));
+        if (res.backupAll && res.backupAll.length) {
+          const mark = (it) => (!it.ok ? '–' : it.hasAds === false ? '✓' : it.hasAds ? '✗' : '?');
+          const list = res.backupAll.map((it) => it.type + (it.ok ? ' ' + it.quality : '') + ' ' + mark(it)).join(' · ');
+          typesLine = list;
+          add(res.backupAll.some((it) => it.hasAds === false), t('stBackupAll'), list);
+        }
       }
     }
     const latest = await checkUpdate();
@@ -1624,7 +1920,7 @@
 
     const ok = results.filter((r) => r.ok).length;
     const failed = results.filter((r) => !r.ok).map((r) => r.label).join(', ');
-    logEvent(failed ? 'warn' : 'info', 'selftest', { ok, total: results.length, failed });
+    logEvent(failed ? 'warn' : 'info', 'selftest', { ok, total: results.length, failed, types: typesLine });
     showNotice(t('selftestDone')(ok, results.length), 5000);
     lastSelfTest = results;
     return results;
@@ -1688,7 +1984,7 @@
     saveSettings();
     if (key === 'emergency') { updateEmergency(); if (!value) emergencyOff(); }
     if (key === 'showNotice' && !value) showNotice(null, 0, true);
-    if (key === 'hideTurbo' || key === 'hidePrime') applyPageOptions();
+    if (key === 'hideTurbo' || key === 'hidePrime' || key === 'glass' || key === 'accent') applyPageOptions();
     if (key === 'updateCheck' && value) checkUpdate();
     renderCounter();
   }
@@ -1717,8 +2013,14 @@
     return { head, body, label };
   }
 
+  // Bereich im Panel öffnen/schließen (immer nur einer offen)
+  function toggleSection(name) {
+    box.section = box.section === name ? null : name;
+    saveBox();
+    renderCounter();
+  }
+
   function buildSettings() {
-    ui.settingsBtn = el('button', 'ttv-ab-wide');
     ui.settingsWrap = el('div', 'ttv-ab-fold');
     ui.inputs = {};
     let current = ui.settingsWrap;
@@ -1743,8 +2045,24 @@
     group('setView', t('groupView'));
     check('showNotice', t('setNotice'));
     check('showCounter', t('setCounter'), t('setCounterHint'));
-    check('devMode', t('setDev'), t('setDevHint'));
     check('fadeIdle', t('setFadeIdle'), t('setFadeIdleHint'));
+    check('glass', t('setGlass'), t('setGlassHint'));
+    check('mini', t('setMini'), t('setMiniHint'));
+    check('onlyChannel', t('setOnlyChannel'), t('setOnlyChannelHint'));
+    check('autoClose', t('setAutoClose'), t('setAutoCloseHint'));
+    check('weekly', t('setWeekly'), t('setWeeklyHint'));
+    // Akzentfarbe
+    const accRow = el('label', 'ttv-ab-setting ttv-ab-lang');
+    const accSel = el('select');
+    for (const [val, label] of Object.entries(t('accentNames'))) {
+      const o = el('option', '', label);
+      o.value = val;
+      accSel.append(o);
+    }
+    accSel.value = settings.accent;
+    accSel.addEventListener('change', () => setSetting('accent', accSel.value));
+    accRow.append(el('span', '', t('setAccent')), accSel);
+    current.append(accRow);
     const langRow = el('label', 'ttv-ab-setting ttv-ab-lang');
     const select = el('select');
     for (const [val, label] of [['auto', t('langAuto')], ['de', 'Deutsch'], ['en', 'English']]) {
@@ -1795,15 +2113,23 @@
     backup.append(exportBtn, ui.importBtn, csvBtn, file);
     current.append(backup);
 
-    ui.settingsBtn.addEventListener('click', () => {
-      box.settingsOpen = !box.settingsOpen;
-      saveBox();
-      renderCounter();
+    // Einstellungen auf Standard (Zähler, Verlauf und Protokoll bleiben)
+    const resetRow = el('div', 'ttv-ab-actions ttv-ab-danger');
+    const resetBtn = el('button', '', t('resetSettings'));
+    resetBtn.title = t('resetSettingsTitle');
+    confirmClick(resetBtn, () => {
+      settings = Object.assign({}, CONFIG.defaults);
+      saveSettings();
+      if (!settings.emergency) emergencyOff();
+      applyPageOptions();
+      rebuildCounter();
+      showNotice(t('resetSettingsDone'), 3000, true);
     });
+    resetRow.append(resetBtn);
+    ui.settingsWrap.append(resetRow);
   }
 
   function buildStats() {
-    ui.statsBtn = el('button', 'ttv-ab-wide');
     ui.statsWrap = el('div', 'ttv-ab-fold');
     const days = foldSection('last7', t('last7'), true);
     ui.chart = el('div', 'ttv-ab-chart');
@@ -1812,11 +2138,6 @@
     ui.channels = el('ul');
     chans.body.append(ui.channels);
     ui.statsWrap.append(days.head, days.body, chans.head, chans.body);
-    ui.statsBtn.addEventListener('click', () => {
-      box.statsOpen = !box.statsOpen;
-      saveBox();
-      renderCounter();
-    });
   }
 
   function renderStats(s) {
@@ -1855,15 +2176,25 @@
     ui.root = el('div');
     ui.root.id = 'ttv-adblock-counter';
 
-    // Kopfzeile: Zähler, Update, Dev, Notfall-Modus, Auf-/Zuklappen, Schloss
+    // Kopfzeile schlicht: Zähler, Auf-/Zuklappen (dazu ⬆ bei Update)
     ui.head = el('div', 'ttv-ab-head');
-    ui.text = el('span');
+    ui.shield = el('span', 'ttv-ab-shield', '🛡');
+    ui.shield.title = t('shieldTitle');
+    ui.text = el('span', 'ttv-ab-text');
     ui.update = el('button', 'ttv-ab-icon ttv-ab-update', '⬆');
-    ui.dev = el('button', 'ttv-ab-icon ttv-ab-devbtn', '🛠');
-    ui.emergency = el('button', 'ttv-ab-icon ttv-ab-emergency', '🛟');
-    ui.toggle = el('button', 'ttv-ab-icon');
-    ui.lock = el('button', 'ttv-ab-icon');
-    ui.head.append(ui.text, ui.update, ui.dev, ui.emergency, ui.toggle, ui.lock);
+    ui.toggle = el('button', 'ttv-ab-icon ttv-ab-toggle');
+    ui.head.append(ui.shield, ui.text, ui.update, ui.toggle);
+    // Doppelklick auf 🛡: Box zurück an die Standardposition (unten links)
+    ui.shield.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      box.x = null;
+      box.y = null;
+      saveBox();
+      placeCounter();
+    });
+    // Notfall-Modus und Schloss sitzen in der Icon-Leiste im Panel
+    ui.emergency = el('button', 'ttv-ab-tool ttv-ab-emergency', '🛟');
+    ui.lock = el('button', 'ttv-ab-tool');
     ui.head.addEventListener('dblclick', (e) => {
       if (e.target.closest('button')) return;
       box.expanded = !box.expanded;
@@ -1873,6 +2204,27 @@
 
     // Panel
     ui.panel = el('div', 'ttv-ab-panel');
+    // Kacheln: das Wichtigste groß
+    const tiles = el('div', 'ttv-ab-tiles');
+    const tile = (label, cls, onClick) => {
+      const v = el('b', cls || '', '0');
+      const t0 = el('div', 'ttv-ab-tile' + (onClick ? ' switch' : ''));
+      const lbl = el('small', '', label);
+      t0.append(v, lbl);
+      if (onClick) {
+        t0.title = t('tileSwitch');
+        t0.addEventListener('click', onClick);
+      }
+      tiles.append(t0);
+      v.label = lbl;
+      return v;
+    };
+    // Kacheln „heute“ und „gespart“ lassen sich antippen: heute ↔ 7 Tage, gesamt ↔ heute
+    ui.tToday = tile(t('tileToday'), '', () => { box.tileToday = box.tileToday === 'week' ? 'today' : 'week'; saveBox(); renderCounter(); });
+    ui.tTotal = tile(t('tileTotal'));
+    ui.tSaved = tile(t('tileSaved'), 'good', () => { box.tileSaved = box.tileSaved === 'today' ? 'total' : 'today'; saveBox(); renderCounter(); });
+    ui.leakNote = el('div', 'ttv-ab-leaknote');
+    // Ausführliche Zahlen im Dev-Tab
     const stats = el('div', 'ttv-ab-stats');
     const row = (label, cls, dev) => {
       const k = el('span', dev ? 'ttv-ab-dev' : '', label);
@@ -1881,15 +2233,13 @@
       return v;
     };
     ui.vTab = row(t('statTab'), '', true);
-    ui.vToday = row(t('statToday'));
-    ui.vTotal = row(t('statTotal'));
     ui.vSavedToday = row(t('statSavedToday'), 'good');
-    ui.vSavedTotal = row(t('statSavedTotal'), 'good');
     ui.vLeaked = row(t('statLeaked'), 'bad');
-    ui.last = el('div', 'ttv-ab-muted ttv-ab-dev');
-    ui.issue = el('div', 'ttv-ab-issue ttv-ab-dev');
+    ui.last = el('div', 'ttv-ab-muted');
+    ui.issue = el('div', 'ttv-ab-issue');
 
-    // Melde-Zeile: [Zeitstempel] [Durchgerutscht] [Sync] – Zeitstempel & Sync nur im Dev-Modus
+    // Melde-Zeile: [Zeitstempel] [Durchgerutscht] [Sync] – im Dev-Tab
+    // (sonst: automatische Erkennung und Alt+W)
     ui.reportRow = el('div', 'ttv-ab-reportrow');
     ui.stamp = el('button', 'ttv-ab-stamp ttv-ab-dev', t('stamp'));
     ui.stamp.title = t('stampTitle');
@@ -1900,8 +2250,8 @@
 
     buildStats();
 
-    // Dev-Bereich: Durchgerutscht-Liste, Ereignisse, Werkzeuge
-    ui.devWrap = el('div', 'ttv-ab-dev');
+    // Dev-Tab (🛠, nur im Dev-Modus): Status · Melden · Selbsttest · Protokolle · Werkzeuge
+    ui.devWrap = el('div', 'ttv-ab-fold ttv-ab-devtab');
     const leaks = foldSection('leaks', '', true);
     ui.listTitle = leaks.label; // Text mit Anzahl wird beim Rendern gesetzt
     ui.list = el('ul');
@@ -1909,13 +2259,18 @@
     const events = foldSection('events', t('eventsTitle'), true);
     ui.events = el('ul', 'ttv-ab-events');
     events.body.append(ui.events);
-    const devActions = el('div', 'ttv-ab-actions');
+    // Werkzeuge: Kopieren getrennt von den Lösch-Knöpfen
+    const tools = foldSection('devtools', t('devTools'), true);
+    const copyRow = el('div', 'ttv-ab-actions');
     ui.copy = el('button', '', t('copyLog'));
+    copyRow.append(ui.copy);
+    const dangerRow = el('div', 'ttv-ab-actions ttv-ab-danger');
     ui.clear = el('button', '', t('clearLeaked'));
     ui.clearEvents = el('button', '', t('clearEvents'));
     ui.clearEvents.title = t('clearEventsTitle');
     ui.reset = el('button', '', t('resetAll'));
-    devActions.append(ui.copy, ui.clearEvents, ui.clear, ui.reset);
+    dangerRow.append(ui.clearEvents, ui.clear, ui.reset);
+    tools.body.append(copyRow, dangerRow);
     // Selbsttest
     const st = foldSection('selftest', t('selftestTitleList'), true);
     ui.selftestBtn = el('button', 'ttv-ab-wide ttv-ab-selftest', t('selftestBtn'));
@@ -1931,16 +2286,52 @@
       ui.selftestBtn.textContent = t('selftestBtn');
     });
     if (lastSelfTest) renderSelfTest(lastSelfTest);
-    ui.devWrap.append(st.head, st.body, leaks.head, leaks.body, events.head, events.body, devActions);
+    const status = el('div', 'ttv-ab-devcard');
+    status.append(stats, ui.last, ui.issue);
+    ui.devWrap.append(status, ui.reportRow, st.head, st.body, leaks.head, leaks.body,
+      events.head, events.body, tools.head, tools.body);
 
-    // Immer sichtbar: Fehler melden, Updates
+    // Bereich „Hilfe“ (🐞): Fehler melden, Updates
+    ui.helpWrap = el('div', 'ttv-ab-fold');
     const mainActions = el('div', 'ttv-ab-actions');
     ui.reportBug = el('button', '', t('reportBug'));
     ui.reportBug.title = t('reportBugTitle');
     ui.checkUpdate = el('button', '', t('checkUpdate'));
     mainActions.append(ui.reportBug, ui.checkUpdate);
+    ui.helpWrap.append(mainActions);
 
     buildSettings();
+
+    // Icon-Leiste: 📊 Verlauf · 🛟 Notfall · 🔒 Schloss · 🐞 Hilfe · 🛠 Dev (nur im Dev-Modus) · ⚙ Einstellungen
+    ui.toolbar = el('div', 'ttv-ab-toolbar');
+    ui.dev = el('button', 'ttv-ab-tool ttv-ab-devtool', '🛠');
+    setTip(ui.dev, t('tipDev'));
+    ui.dev.addEventListener('click', () => toggleSection('dev'));
+    ui.statsTool = el('button', 'ttv-ab-tool', '📊');
+    setTip(ui.statsTool, t('tipStats'));
+    ui.helpTool = el('button', 'ttv-ab-tool', '🐞');
+    setTip(ui.helpTool, t('tipHelp'));
+    ui.settingsTool = el('button', 'ttv-ab-tool', '⚙');
+    setTip(ui.settingsTool, t('tipSettings'));
+    ui.toolbar.append(ui.statsTool, ui.emergency, ui.lock, ui.helpTool, ui.dev, ui.settingsTool);
+    ui.statsTool.addEventListener('click', () => toggleSection('stats'));
+    // Versteckt: 5× schnell auf 🐞 schaltet den Dev-Modus an/aus
+    let bugClicks = [];
+    ui.helpTool.addEventListener('click', () => {
+      const now = Date.now();
+      bugClicks = bugClicks.filter((c) => now - c < 1500).concat(now);
+      if (bugClicks.length >= 5) {
+        bugClicks = [];
+        const on = !settings.devMode;
+        box.section = on ? 'dev' : null;
+        saveBox();
+        setSetting('devMode', on);
+        showNotice(on ? t('devOnNotice') : t('devOffNotice'), 3000, true);
+        return;
+      }
+      toggleSection('help');
+    });
+    ui.settingsTool.addEventListener('click', () => toggleSection('settings'));
 
     // Fußzeile mit Version
     ui.footer = el('div', 'ttv-ab-footer');
@@ -1951,8 +2342,7 @@
     news.rel = 'noopener';
     ui.footer.append(ui.versionText, document.createTextNode(' · '), news);
 
-    ui.panel.append(stats, ui.last, ui.issue, ui.reportRow, ui.statsBtn, ui.statsWrap, ui.devWrap,
-      mainActions, ui.settingsBtn, ui.settingsWrap, ui.footer);
+    ui.panel.append(tiles, ui.leakNote, ui.toolbar, ui.statsWrap, ui.helpWrap, ui.devWrap, ui.settingsWrap, ui.footer);
     // Griff unten: Höhe des Panels frei ziehen, Doppelklick = wieder halbe Fensterhöhe
     ui.grip = el('div', 'ttv-ab-grip');
     ui.grip.title = t('gripTitle');
@@ -1973,10 +2363,6 @@
       renderCounter();
     });
     ui.emergency.addEventListener('click', () => setEmergency(!settings.emergency));
-    ui.dev.addEventListener('click', () => {
-      setSetting('devMode', false);
-      if (ui.inputs.devMode) ui.inputs.devMode.checked = false;
-    });
     ui.update.addEventListener('click', openUpdate);
     ui.stamp.addEventListener('click', pressStamp);
     ui.leak.addEventListener('click', pressLeak);
@@ -2044,10 +2430,17 @@
     const s = loadStats();
     const upd = settings.updateCheck ? updateInfo() : null;
 
-    ui.text.textContent = !settings.showCounter
-      ? '🛡'
+    // Laufende/gerade beendete Werbepause steht direkt in der Kopfzeile
+    const status = headStatus && (!headStatus.until || Date.now() < headStatus.until) ? headStatus : null;
+    ui.text.textContent = status ? status.text
+      : !settings.showCounter ? ''
       : s.savedTotal > 0 ? t('headSaved')(s.total, fmtDur(s.savedTotal)) : t('head')(s.total);
-    ui.head.title = t('version')(VERSION) + '\n' + (box.locked ? t('headLocked') : t('headDrag'));
+    ui.root.classList.toggle('status', !!status);
+    ui.root.classList.toggle('adlive', !!status && status.cls === 'live');
+    ui.root.classList.toggle('addone', !!status && status.cls === 'done');
+    // Mini-Modus: zugeklappt nur 🛡 (auch außerhalb von Kanal-Seiten, falls eingestellt)
+    ui.root.classList.toggle('mini', !box.expanded && (!!settings.mini || (!!settings.onlyChannel && !currentChannel())));
+    ui.head.title = t('headFull')(s.total, fmtDur(s.savedTotal)) + '\n' + t('version')(VERSION) + '\n' + (box.locked ? t('headLocked') : t('headDrag'));
     ui.root.classList.toggle('expanded', !!box.expanded);
     // Beim Aufklappen automatisch auf die halbe Fensterhöhe stellen, danach frei verstellbar
     if (box.expanded && !wasExpanded) panelHeight = halfPanelHeight();
@@ -2060,19 +2453,26 @@
     ui.update.hidden = !upd;
     if (upd) ui.update.title = t('updateAvail')(upd);
     ui.dev.hidden = !settings.devMode;
-    ui.dev.title = t('devTitle');
-    ui.settingsWrap.classList.toggle('open', !!box.settingsOpen);
-    ui.settingsBtn.textContent = t('settings') + (box.settingsOpen ? ' ▴' : ' ▾');
-    ui.statsWrap.classList.toggle('open', !!box.statsOpen);
-    ui.statsBtn.textContent = t('statsBtn') + (box.statsOpen ? ' ▴' : ' ▾');
+    // Punkt am 🛠, wenn es ein aktuelles Problem gibt
+    ui.dev.classList.toggle('alert', !!settings.devMode && !!lastIssue());
+    const section = box.section === 'dev' && !settings.devMode ? null : box.section;
+    for (const [name, wrap, tool] of [['stats', ui.statsWrap, ui.statsTool], ['help', ui.helpWrap, ui.helpTool], ['dev', ui.devWrap, ui.dev], ['settings', ui.settingsWrap, ui.settingsTool]]) {
+      wrap.classList.toggle('open', section === name);
+      tool.classList.toggle('active', section === name);
+    }
     for (const [k, input] of Object.entries(ui.inputs)) input.checked = !!settings[k];
 
     if (box.expanded) {
+      const week = box.tileToday === 'week';
+      ui.tToday.textContent = String(week ? sumDays(s, 7).ads : s.today);
+      ui.tToday.label.textContent = week ? t('tileWeek') : t('tileToday');
+      ui.tTotal.textContent = String(s.total);
+      const savedToday = box.tileSaved === 'today';
+      ui.tSaved.textContent = fmtDur(savedToday ? s.savedToday : s.savedTotal);
+      ui.tSaved.label.textContent = savedToday ? t('tileSavedToday') : t('tileSaved');
+      ui.leakNote.textContent = s.leaked > 0 ? t('leakNote')(s.leaked) : '';
       ui.vTab.textContent = String(sessionCount);
-      ui.vToday.textContent = String(s.today);
-      ui.vTotal.textContent = String(s.total);
       ui.vSavedToday.textContent = fmtDur(s.savedToday);
-      ui.vSavedTotal.textContent = fmtDur(s.savedTotal);
       ui.vLeaked.textContent = String(s.leaked);
       ui.last.textContent = lastAd
         ? t('lastAd')(fmtTime(lastAd.time), lastAd.channel, modeText(lastAd.mode))
@@ -2082,7 +2482,7 @@
       ui.issue.classList.toggle('error', !!issue && issue.level === 'error');
       ui.versionText.textContent = t('version')(VERSION) + (upd ? ' → ' + upd : '');
 
-      if (box.statsOpen) renderStats(s);
+      if (box.section === 'stats') renderStats(s);
 
       if (settings.devMode) {
         const reports = loadReports();
@@ -2150,6 +2550,8 @@
     if (!root) return;
     root.classList.toggle('ttv-ab-hide-turbo', !!settings.hideTurbo);
     root.classList.toggle('ttv-ab-hide-prime', !!settings.hidePrime);
+    root.classList.toggle('ttv-ab-glass', !!settings.glass);
+    for (const a of ['blue', 'green', 'pink']) root.classList.toggle('ttv-ab-acc-' + a, settings.accent === a);
   }
   applyPageOptions();
 
@@ -2166,15 +2568,43 @@
     }
   });
 
-  // Tastenkürzel: Alt+W = Durchgerutscht, Alt+Z = Zeitstempel (nicht beim Tippen im Chat)
+  function setExpanded(on) {
+    if (!ui.root || !!box.expanded === on) return;
+    box.expanded = on;
+    saveBox();
+    renderCounter();
+  }
+
+  // Tastenkürzel: Alt+A = Panel auf/zu, Alt+W = Durchgerutscht, Alt+Z = Zeitstempel,
+  // Esc = Panel schließen (nicht beim Tippen im Chat)
   window.addEventListener('keydown', (e) => {
-    if (!settings.shortcuts || !e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
     const tgt = e.target;
     if (tgt && (tgt.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(tgt.tagName))) return;
+    if (e.key === 'Escape' && settings.autoClose && box.expanded && !e.altKey && !e.ctrlKey && !e.metaKey) {
+      setExpanded(false);
+      return;
+    }
+    if (!settings.shortcuts || !e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
     const key = (e.key || '').toLowerCase();
     if (key === 'w') { e.preventDefault(); pressLeak(); }
     else if (key === 'z') { e.preventDefault(); pressStamp(); }
+    else if (key === 'a') { e.preventDefault(); setExpanded(!box.expanded); }
   }, true);
+
+  // Klick außerhalb der Box schließt das Panel
+  document.addEventListener('pointerdown', (e) => {
+    if (!settings.autoClose || !box.expanded || !ui.root || ui.root.contains(e.target)) return;
+    if (notice && notice.contains(e.target)) return;
+    setExpanded(false);
+  }, true);
+
+  // Twitch wechselt Seiten ohne Neuladen: Box an die neue Seite anpassen (Mini außerhalb von Kanälen)
+  let lastPath = location.pathname;
+  setInterval(() => {
+    if (location.pathname === lastPath) return;
+    lastPath = location.pathname;
+    renderCounter();
+  }, 1000);
 
   // ---------------------------------------------------------------------------
   // Durchgerutschte Werbung erkennen + Notfall-Modus
@@ -2407,10 +2837,14 @@
         if (lastAd.mode !== 'backup' || msg.mode === 'backup') lastAd.mode = msg.mode;
         if (msg.quality) lastAd.quality = msg.quality;
         if (msg.channel) lastAd.channel = msg.channel;
-        showNotice(lastAd.mode === 'backup'
-          ? (lastAd.quality && lastAd.quality !== '?' ? t('noticeBackupQ')(lastAd.quality) : t('noticeBackup'))
-          : t('noticeStripped'));
-        if (box.expanded) renderCounter();
+        const backup = lastAd.mode === 'backup';
+        setHeadStatus(backup ? t('headAdBackup')(lastAd.quality) : t('headAdStrip'), 'live', 0);
+        // Pop-up nur, wenn es etwas zu wissen gibt (Bild kann stehen bleiben) oder im Vollbild
+        if (!backup || document.fullscreenElement) {
+          showNotice(backup
+            ? (lastAd.quality && lastAd.quality !== '?' ? t('noticeBackupQ')(lastAd.quality) : t('noticeBackup'))
+            : t('noticeStripped'));
+        }
       } else if (msg.type === 'ad-end') {
         adBreak.sources.delete(msg.src || 'alt');
         adBreak.seconds = Math.max(adBreak.seconds, msg.seconds || 0);
@@ -2438,6 +2872,19 @@
     const upd = loadJson(UPDATE_KEY, {});
     if (settings.updateCheck && Date.now() - (upd.checked || 0) > 24 * 3600 * 1000) {
       setTimeout(checkUpdate, 15 * 1000);
+    }
+    // Wochen-Rückblick: in einer neuen Woche einmal die Zahlen der Vorwoche (Mo–So) zeigen
+    const monday = new Date();
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+    const thisWeek = dayKey(monday);
+    if (loadJson(WEEKLY_KEY, null) !== thisWeek) {
+      saveJson(WEEKLY_KEY, thisWeek);
+      const lastSunday = new Date(monday);
+      lastSunday.setDate(lastSunday.getDate() - 1);
+      const w = sumDays(loadStats(), 7, lastSunday);
+      if (settings.weekly && w.ads > 0) {
+        setTimeout(() => showNotice(t('weeklyRecap')(w.ads, fmtDur(w.saved)), 10000), seen !== VERSION ? 15000 : 4000);
+      }
     }
   })();
 })();
