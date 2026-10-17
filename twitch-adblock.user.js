@@ -21,40 +21,40 @@
   'use strict';
 
   // ---------------------------------------------------------------------------
-  // Einstellungen
+  // Settings
   // ---------------------------------------------------------------------------
   const CONFIG = {
-    // Player-Typen, über die ein werbefreier Ersatz-Stream angefragt wird
-    // (alle werden probiert, der werbefreie mit der besten Qualität gewinnt; bei Gleichstand die Reihenfolge)
+    // Player types used to request an ad-free replacement stream
+    // (all are tried, the ad-free one with the best quality wins; ties go by this order)
     playerTypes: ['embed', 'site', 'popout', 'picture-by-picture', 'autoplay', 'frontpage'],
-    // Öffentliche Client-ID des Twitch-Webplayers
+    // Public client ID of the Twitch web player
     clientId: 'kimne78kx3ncx6brgo4mv6wki5h1ko',
-    // Standardwerte der Einstellungen (änderbar im Panel unter ⚙)
+    // Default settings (changeable in the panel under ⚙)
     defaults: {
-      showNotice: true,  // Hinweise einblenden
-      showCounter: true, // Zahlen in der Box anzeigen (aus = nur 🛡-Symbol)
-      autoDetect: true,  // durchgerutschte Werbung automatisch protokollieren
-      emergency: true,   // Notfall-Modus
+      showNotice: true,  // show notices
+      showCounter: true, // show numbers in the box (off = 🛡 icon only)
+      autoDetect: true,  // log ads that slip through automatically
+      emergency: true,   // emergency mode
       lang: 'auto',      // 'auto' | 'de' | 'en'
-      devMode: false,    // Werkzeuge zur Fehlersuche im Panel anzeigen
-      autoRecover: true, // hängendes Bild automatisch reparieren
-      shortcuts: true,   // Alt+W = Durchgerutscht, Alt+Z = Zeitstempel
-      updateCheck: true, // einmal am Tag auf GitHub nach Updates suchen
-      hideTurbo: false,  // Turbo-Werbung ausblenden
-      hidePrime: false,  // Prime-Gaming-Banner ausblenden
-      stopFrontpage: false, // automatisch startendes Video auf der Startseite stoppen
-      vod: false,        // Werbung in Aufzeichnungen filtern (experimentell)
-      preferQuality: false, // Ersatz-Stream nur in voller Qualität, sonst herausschneiden
-      fadeIdle: true,    // Box im Leerlauf blass
-      glass: true,       // Glas-Design (aus = klassisch, deckend)
-      accent: 'purple',  // Akzentfarbe: purple | blue | green | pink
-      mini: false,       // zugeklappt nur ein kleines 🛡
-      onlyChannel: true, // außerhalb von Kanal-Seiten nur das kleine 🛡
-      autoClose: true,   // Panel mit Esc / Klick außerhalb schließen
-      weekly: true,      // Wochen-Rückblick
+      devMode: false,    // show troubleshooting tools in the panel
+      autoRecover: true, // repair a frozen picture automatically
+      shortcuts: true,   // Alt+W = slipped through, Alt+Z = timestamp
+      updateCheck: true, // check GitHub for updates once a day
+      hideTurbo: false,  // hide Turbo ads
+      hidePrime: false,  // hide Prime Gaming banners
+      stopFrontpage: false, // stop the autoplaying video on the front page
+      vod: false,        // filter ads in recordings (experimental)
+      preferQuality: false, // replacement stream only in full quality, otherwise cut the ad out
+      fadeIdle: true,    // fade the box when idle
+      glass: true,       // glass design (off = classic, opaque)
+      accent: 'purple',  // accent colour: purple | blue | green | pink
+      mini: false,       // collapsed box is just a small 🛡
+      onlyChannel: true, // only the small 🛡 outside channel pages
+      autoClose: true,   // close the panel with Esc / click outside
+      weekly: true,      // weekly recap
     },
     channelName: 'ttv-adblock',
-    // Damit mehrere offene Twitch-Tabs sich nicht gegenseitig mitzählen
+    // So that several open Twitch tabs don't count each other's ads
     tabId: Math.random().toString(36).slice(2),
     deviceId: null,
   };
@@ -62,22 +62,22 @@
   try {
     const m = document.cookie.match(/(?:^|;\s*)unique_id=([^;]+)/);
     if (m) CONFIG.deviceId = decodeURIComponent(m[1]);
-  } catch (e) { /* egal */ }
+  } catch (e) { /* doesn't matter */ }
 
   // ---------------------------------------------------------------------------
-  // Dieser Code läuft IM Video-Worker von Twitch. Er fängt die HLS-Playlists ab,
-  // erkennt eingebettete Werbung und ersetzt sie durch einen werbefreien Stream
-  // oder schneidet die Werbesegmente heraus.
+  // This code runs INSIDE Twitch's video worker. It intercepts the HLS playlists,
+  // detects embedded ads and replaces them with an ad-free stream
+  // or cuts the ad segments out.
   // ---------------------------------------------------------------------------
   function workerMain(cfg) {
     const realFetch = self.fetch.bind(self);
     let bc = null;
-    try { bc = new BroadcastChannel(cfg.channelName); } catch (e) { /* nicht verfügbar */ }
+    try { bc = new BroadcastChannel(cfg.channelName); } catch (e) { /* not available */ }
     const notify = (msg) => {
       msg.tabId = cfg.tabId;
-      try { if (bc) bc.postMessage(msg); } catch (e) { /* egal */ }
+      try { if (bc) bc.postMessage(msg); } catch (e) { /* doesn't matter */ }
     };
-    // Ereignis fürs Protokoll (Texte übersetzt die Hauptseite anhand des Codes)
+    // Event for the log (the main page translates the texts by code)
     const log = (level, code, data) => notify(Object.assign({ type: 'log', level, code }, data));
     const loggedThisBreak = new Set();
     const logOnce = (key, level, code, data) => {
@@ -87,14 +87,14 @@
     };
     let lastMediaFailLog = 0;
 
-    const streams = new Map();     // URL der Media-Playlist -> { channel, res, fps }
-    const backupCache = new Map(); // "kanal|playerType" -> { variants, time, hasAds }
-    // Werbe-Zustand PRO Playlist: Der Player fragt oft mehrere Playlists gleichzeitig ab
-    // (z. B. zwei Qualitäten). Ein gemeinsamer Zustand würde sonst ständig hin- und herspringen.
+    const streams = new Map();     // media playlist URL -> { channel, res, fps }
+    const backupCache = new Map(); // "channel|playerType" -> { variants, time, hasAds }
+    // Ad state PER playlist: the player often fetches several playlists at once
+    // (e.g. two qualities). A shared state would keep flipping back and forth.
     const workerId = Math.random().toString(36).slice(2, 8);
-    const adStates = new Map(); // Playlist (ohne Query) -> { start, spots: Map(ID -> Dauer), clean }
+    const adStates = new Map(); // playlist (without query) -> { start, spots: Map(ID -> duration), clean }
 
-    // Werbespots der aktuellen Pause mit ihrer Länge merken
+    // Remember the ad spots of the current break with their length
     function collectAdSpots(state, text) {
       for (const line of text.split('\n')) {
         if (!line.startsWith('#EXT-X-DATERANGE') || !line.includes('stitched-ad')) continue;
@@ -104,7 +104,7 @@
       }
     }
 
-    // Gesparte Zeit der Pause: Summe der Spot-Längen, mindestens aber die gemessene Dauer (max. 10 min)
+    // Time saved by the break: sum of the spot lengths, but at least the measured duration (max. 10 min)
     function adBreakSeconds(state) {
       let sum = 0;
       for (const d of state.spots.values()) sum += d;
@@ -112,12 +112,12 @@
       return Math.round(Math.min(sum, 600));
     }
 
-    // Stream-Liste („usher“): alte und neue Adressform, z. B. /api/channel/hls/ und /api/v2/channel/hls/
+    // Stream list ("usher"): old and new address form, e.g. /api/channel/hls/ and /api/v2/channel/hls/
     const USHER_RE = /usher\.ttvnw\.net(\/api\/(?:v\d+\/)?channel\/hls\/)/;
     let usherPath = '/api/channel/hls/';
     let lastChannel = null;
 
-    // Für das Protokoll: einmalig festhalten, welche Playlist-Adressen der Player nutzt (ohne Zugangsdaten)
+    // For the log: record once which playlist addresses the player uses (without access tokens)
     const seenKinds = new Set();
     function logPlaylistSeen(kind, url) {
       if (seenKinds.has(kind)) return;
@@ -151,7 +151,7 @@
         while (j < lines.length && (lines[j].trim() === '' || lines[j].trim().startsWith('#'))) j++;
         if (j >= lines.length) break;
         let url = lines[j].trim();
-        try { url = new URL(url, baseUrl).href; } catch (e) { /* schon absolut */ }
+        try { url = new URL(url, baseUrl).href; } catch (e) { /* already absolute */ }
         variants.push({
           url,
           res: parseAttr(line, 'RESOLUTION'),
@@ -162,7 +162,7 @@
       return variants;
     }
 
-    // „1280x720“ -> 720 bzw. „720p“
+    // "1280x720" -> 720 or "720p"
     function height(res) {
       const m = res && res.match(/\d+x(\d+)/);
       return m ? parseInt(m[1], 10) : 0;
@@ -176,7 +176,7 @@
 
     function pickVariant(variants, info) {
       if (!variants.length) return null;
-      if (!info.res) return variants[0]; // Auflösung unbekannt: beste Qualität (steht bei Twitch zuerst)
+      if (!info.res) return variants[0]; // resolution unknown: best quality (Twitch lists it first)
       const exact = variants.find(v => v.res === info.res && Math.round(v.fps) === Math.round(info.fps))
         || variants.find(v => v.res === info.res);
       if (exact) return exact;
@@ -184,14 +184,14 @@
       return variants.slice().sort((a, b) => Math.abs(pixels(a.res) - target) - Math.abs(pixels(b.res) - target))[0];
     }
 
-    // Entfernt Werbesegmente direkt aus der Playlist (Notlösung: Bild kann kurz stehen bleiben)
+    // Removes ad segments directly from the playlist (fallback: the picture may freeze briefly)
     function stripAds(text) {
       const lines = text.split('\n');
       const out = [];
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         if (line.startsWith('#EXTINF') && !line.includes(',live')) {
-          // Segment-URL (nächste Nicht-Tag-Zeile) mit überspringen
+          // also skip the segment URL (next non-tag line)
           while (i + 1 < lines.length && lines[i + 1].startsWith('#') && !lines[i + 1].startsWith('#EXTINF')) i++;
           if (i + 1 < lines.length && !lines[i + 1].startsWith('#')) i++;
           continue;
@@ -203,7 +203,7 @@
       return out.join('\n');
     }
 
-    // VODs: Inhalts-Segmente haben keinen Titel, Werbe-Segmente einen (z. B. „Amazon“)
+    // VODs: content segments have no title, ad segments have one (e.g. "Amazon")
     function stripVodAds(text) {
       const lines = text.split('\n');
       const out = [];
@@ -261,8 +261,8 @@
       }
     }
 
-    // Ersatz-Stream eines Player-Typs (4 min zwischengespeichert, auch Fehlschläge, damit Twitch nicht
-    // bei jedem Playlist-Abruf erneut gefragt wird)
+    // Replacement stream of one player type (cached for 4 min, failures too, so Twitch isn't
+    // asked again on every playlist fetch)
     async function getBackupEntry(channel, playerType) {
       const key = channel + '|' + playerType;
       let entry = backupCache.get(key);
@@ -273,7 +273,7 @@
       return entry;
     }
 
-    // Probiert alle Player-Typen und nimmt den werbefreien mit der besten Qualität
+    // Tries all player types and takes the ad-free one with the best quality
     async function getBackupPlaylist(info) {
       const wanted = height(info.res);
       let best = null;
@@ -284,8 +284,8 @@
         if (!variant) continue;
         const h = height(variant.res);
         const q = quality(variant.res);
-        if (best && h <= best.h) continue; // kann nicht besser werden
-        // Option „nur volle Qualität“: schlechteren Ersatz-Stream nicht nehmen, lieber herausschneiden
+        if (best && h <= best.h) continue; // can't get any better
+        // option "full quality only": don't use a worse replacement stream, cut the ad out instead
         if (cfg.preferQuality && wanted && h < wanted) {
           logOnce('backupLowQuality|' + playerType, 'info', 'backupLowQuality', { playerType, quality: q, wanted: quality(info.res) });
           continue;
@@ -300,7 +300,7 @@
             continue;
           }
           best = { text, quality: q, h, playerType };
-          if (!wanted || h >= wanted) break; // gewünschte Qualität erreicht
+          if (!wanted || h >= wanted) break; // wanted quality reached
         } catch (e) {
           backupCache.delete(info.channel + '|' + playerType);
         }
@@ -317,7 +317,7 @@
     async function handleFetch(input, init) {
       const url = typeof input === 'string' ? input : (input && input.url) || String(input);
 
-      // Master-Playlist: Kanal und Auflösungen der Varianten merken
+      // Master playlist: remember the channel and the resolutions of the variants
       const usher = url.match(USHER_RE);
       if (usher) {
         usherPath = usher[1];
@@ -326,7 +326,7 @@
         const channel = m ? decodeURIComponent(m[1]).toLowerCase() : null;
         const res = await realFetch(input, init);
         if (!res.ok) {
-          // 404 = Twitch meldet den Kanal als offline, 403 = Zugriff verweigert
+          // 404 = Twitch reports the channel as offline, 403 = access denied
           log('error', 'usherFail', { channel, status: res.status });
           return res;
         }
@@ -342,7 +342,7 @@
         return rebuild(res, text);
       }
 
-      // Media-Playlist: auf Werbung prüfen
+      // Media playlist: check for ads
       if (url.includes('.m3u8') && (streams.has(url) || url.includes('ttvnw.net'))) {
         logPlaylistSeen('media', url);
         const res = await realFetch(input, init);
@@ -355,7 +355,7 @@
         }
         let text = await res.text();
         const key = url.split('?')[0];
-        const src = workerId + '|' + key; // eindeutige Quelle, damit die Seite nicht doppelt zählt
+        const src = workerId + '|' + key; // unique source so the page doesn't count twice
         let state = adStates.get(key);
         if (hasAds(text)) {
           if (!state) {
@@ -366,7 +366,7 @@
           }
           state.clean = 0;
           collectAdSpots(state, text);
-          // Playlist-Adresse nicht exakt bekannt? Dann den zuletzt geladenen Kanal nehmen
+          // playlist address not known exactly? Then use the last loaded channel
           const info = streams.get(url) || streams.get(url.split('?')[0])
             || (lastChannel ? { channel: lastChannel, res: null, fps: 0 } : null);
           if (info && !streams.has(url)) logOnce('mediaUnmatched', 'info', 'mediaUnmatched', { channel: info.channel });
@@ -378,7 +378,7 @@
             channel: info ? info.channel : null, quality: replacement ? replacement.quality : null,
           });
         } else if (state && ++state.clean >= 2) {
-          // erst nach zwei werbefreien Abrufen hintereinander gilt die Pause als vorbei
+          // the break only counts as over after two ad-free fetches in a row
           adStates.delete(key);
           if (!adStates.size) backupCache.clear();
           notify({ type: 'ad-end', src, seconds: adBreakSeconds(state) });
@@ -386,7 +386,7 @@
         return rebuild(res, text);
       }
 
-      // Aufzeichnungen (VODs), experimentell: eingebettete Werbung herausschneiden
+      // Recordings (VODs), experimental: cut out embedded ads
       if (cfg.vod && url.includes('.m3u8') && !url.includes('usher.ttvnw.net')) {
         const res = await realFetch(input, init);
         if (!res.ok) return res;
@@ -399,23 +399,23 @@
       return realFetch(input, init);
     }
 
-    // Absicherung: Wirft unser Code einen Fehler, lädt der Stream ganz normal (ohne Filter)
+    // Safety net: if our code throws, the stream loads normally (without the filter)
     self.fetch = async function (input, init) {
       try {
         return await handleFetch(input, init);
       } catch (e) {
-        // Vom Player selbst abgebrochene Anfrage (z. B. Kanalwechsel): normal, kein Fehler
+        // request cancelled by the player itself (e.g. channel switch): normal, not an error
         if (e && (e.name === 'AbortError' || /cancel|abort/i.test(String(e.message)))) throw e;
         log('error', 'exception', { message: String((e && e.message) || e) });
         return realFetch(input, init);
       }
     };
 
-    // Selbsttest auf Anfrage der Seite: Stream-Liste bekannt? Ersatz-Stream von Twitch erhältlich?
+    // Self-test on request of the page: stream list known? Replacement stream available from Twitch?
     async function selfTest() {
       const result = { type: 'selftest-result', usherPath, channel: lastChannel, streamsKnown: streams.size > 0 };
       if (lastChannel) {
-        // alle Player-Typen messen; Ergebnis = werbefreier Typ mit der besten Qualität (wie der Blocker)
+        // measure all player types; result = ad-free type with the best quality (like the blocker)
         result.backupAll = [];
         let best = null;
         for (const playerType of cfg.playerTypes) {
@@ -452,7 +452,7 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Worker von Twitch abfangen und obigen Code voranstellen
+  // Intercept Twitch's worker and prepend the code above
   // ---------------------------------------------------------------------------
   const RealWorker = window.Worker;
 
@@ -476,10 +476,10 @@
         super(scriptURL, options);
         return;
       }
-      // VOD-Filter ist eine Einstellung – gilt für neu gestartete Player
+      // the VOD filter is a setting – applies to newly started players
       let vod = false;
       let preferQuality = false;
-      try { vod = !!settings.vod; preferQuality = !!settings.preferQuality; } catch (e) { /* Einstellungen noch nicht geladen */ }
+      try { vod = !!settings.vod; preferQuality = !!settings.preferQuality; } catch (e) { /* settings not loaded yet */ }
       const cfg = Object.assign({}, CONFIG, { vod, preferQuality });
       const code = '(' + workerMain.toString() + ')(' + JSON.stringify(cfg) + ');\n' + src;
       super(URL.createObjectURL(new Blob([code], { type: 'application/javascript' })), options);
@@ -491,14 +491,14 @@
     Object.defineProperty(window, 'Worker', {
       configurable: true,
       get() { return PatchedWorker; },
-      set() { /* Überschreiben durch die Seite ignorieren */ },
+      set() { /* ignore overrides by the page */ },
     });
   } catch (e) {
     window.Worker = PatchedWorker;
   }
 
   // ---------------------------------------------------------------------------
-  // Werbebanner / Overlays auf der Seite ausblenden
+  // Hide ad banners / overlays on the page
   // ---------------------------------------------------------------------------
   const CSS = `
     html { --ttv-acc: 145, 70, 255; --ttv-acc-l: 191, 148, 255; --ttv-acc-d: 80, 40, 150; --ttv-tint: 60, 40, 90; }
@@ -555,7 +555,7 @@
       display: none; height: 10px; flex: none; cursor: ns-resize; touch-action: none;
       border-top: 1px solid rgba(var(--ttv-acc), 0.3); border-radius: 0 0 10px 10px;
     }
-    /* Box sitzt unten am Fensterrand: Griff oben, Ziehen nach oben = größer */
+    /* box sits at the bottom edge: grip at the top, drag up = bigger */
     #ttv-adblock-counter.grip-top .ttv-ab-grip {
       order: -1; border-top: 0; border-bottom: 1px solid rgba(var(--ttv-acc), 0.3); border-radius: 10px 10px 0 0;
     }
@@ -583,7 +583,7 @@
     #ttv-adblock-counter .ttv-ab-tool:hover { background: rgba(255, 255, 255, 0.1); }
     #ttv-adblock-counter .ttv-ab-tool.active { background: rgba(var(--ttv-acc), 0.35); }
     #ttv-adblock-counter .ttv-ab-devtool { position: relative; }
-    /* Beschriftung der Icons beim Überfahren */
+    /* icon labels on hover */
     #ttv-adblock-counter .ttv-ab-tool { position: relative; }
     #ttv-adblock-counter .ttv-ab-emergency:hover { opacity: 1; filter: none; }
     #ttv-adblock-counter .ttv-ab-tool[data-tip]::before {
@@ -595,7 +595,7 @@
     }
     #ttv-adblock-counter .ttv-ab-tool[data-tip]:hover::before,
     #ttv-adblock-counter .ttv-ab-tool[data-tip]:focus-visible::before { opacity: 1; transform: translate(-50%, 0); }
-    /* ganz außen nicht über den Rand der Box hinausragen */
+    /* outermost icons: don't stick out over the edge of the box */
     #ttv-adblock-counter .ttv-ab-toolbar > .ttv-ab-tool:first-child::before { left: 0; transform: translate(0, 4px); }
     #ttv-adblock-counter .ttv-ab-toolbar > .ttv-ab-tool:first-child:hover::before { transform: translate(0, 0); }
     #ttv-adblock-counter .ttv-ab-toolbar > .ttv-ab-tool:last-child::before { left: auto; right: 0; transform: translate(0, 4px); }
@@ -603,11 +603,11 @@
     #ttv-adblock-counter .ttv-ab-head > .ttv-ab-shield { flex: none; cursor: pointer; padding-right: 2px; }
     #ttv-adblock-counter .ttv-ab-tile.switch { cursor: pointer; transition: background .15s; }
     #ttv-adblock-counter .ttv-ab-tile.switch:hover { background: rgba(255, 255, 255, 0.12); }
-    /* Mini-Modus: zugeklappt nur 🛡, Rest unter der Maus oder während einer Werbepause */
+    /* mini mode: collapsed only 🛡, the rest under the mouse or during an ad break */
     #ttv-adblock-counter.mini:not(:hover):not(.status) .ttv-ab-text,
     #ttv-adblock-counter.mini:not(:hover) .ttv-ab-toggle { display: none; }
     #ttv-adblock-counter.mini:not(:hover):not(.status) .ttv-ab-head { padding: 4px 8px; }
-    /* Werbepause läuft: Kopfzeile leuchtet; danach kurz grün */
+    /* ad break running: top row glows; afterwards briefly green */
     #ttv-adblock-counter.adlive { border-color: rgba(var(--ttv-acc-l), 0.9); animation: ttv-ab-pulse 1.6s ease-in-out infinite; opacity: 1; }
     #ttv-adblock-counter.addone .ttv-ab-text { color: #5fe0a5; }
     #ttv-adblock-counter.addone { opacity: 1; }
@@ -747,7 +747,7 @@
       pointer-events: none; transition: opacity .3s; opacity: 0;
     }
     #ttv-adblock-notice.show { opacity: 1; }
-    /* Vollbild: Hinweis oben mittig im Player */
+    /* fullscreen: notice at the top centre of the player */
     #ttv-adblock-notice.fs {
       position: fixed; left: 50% !important; top: 24px !important; transform: translateX(-50%);
       z-index: 2147483647; font-size: 15px; max-width: 80vw; text-align: center;
@@ -760,7 +760,7 @@
     #ttv-adblock-counter .ttv-ab-selftest-list li.ok { color: #5fe0a5; }
     #ttv-adblock-counter .ttv-ab-selftest-list li.fail { color: #ffb3b3; }
 
-    /* ---- Glas-Design („Liquid Glass“), Einstellung „Glas-Design“ ---- */
+    /* ---- Glass design ("Liquid Glass"), setting "Glass design" ---- */
     html.ttv-ab-glass #ttv-adblock-counter {
       background: linear-gradient(135deg, rgba(var(--ttv-tint), 0.42), rgba(18, 18, 24, 0.5));
       -webkit-backdrop-filter: blur(18px) saturate(170%);
@@ -771,7 +771,7 @@
       color: #f1e6ff; opacity: .92;
       transition: opacity .6s, background .3s, box-shadow .3s, border-radius .3s;
     }
-    /* Glanzkante oben */
+    /* glossy edge at the top */
     html.ttv-ab-glass #ttv-adblock-counter::before {
       content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
       background: linear-gradient(160deg, rgba(255, 255, 255, 0.22) 0%, rgba(var(--ttv-acc-l), 0.10) 28%, transparent 55%);
@@ -818,7 +818,7 @@
       box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 8px 28px rgba(0, 0, 0, 0.4);
       text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
     }
-    /* Browser ohne Unschärfe-Effekt: deckender Hintergrund, damit der Text lesbar bleibt */
+    /* browsers without blur: opaque background so the text stays readable */
     @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
       html.ttv-ab-glass #ttv-adblock-counter { background: rgba(28, 24, 38, 0.95); }
       html.ttv-ab-glass #ttv-adblock-notice { background: rgba(var(--ttv-acc), 0.92); }
@@ -835,8 +835,8 @@
   else document.addEventListener('DOMContentLoaded', injectCss, { once: true });
 
   // ---------------------------------------------------------------------------
-  // Zähler-Box mit Panel, Melde-Funktion, Statistik und Einstellungen
-  // (alles im localStorage von twitch.tv gespeichert)
+  // Counter box with panel, reporting, statistics and settings
+  // (everything is stored in twitch.tv's localStorage)
   // ---------------------------------------------------------------------------
   const VERSION = '2.2.0';
   const REPO_URL = 'https://github.com/r79jv66tjh-byte/twitch-adblock';
@@ -856,13 +856,13 @@
   const MAX_REPORTS = 100;
   const MAX_EVENTS = 200;
 
-  // Kurzinfo „Was ist neu“ zur aktuellen Version
+  // Short "what's new" note for the current version
   const WHATS_NEW = {
     de: 'Neuer schlichter Aufbau im Glas-Design mit Icon-Leiste (Maus drüber = Beschriftung), Werbe-Status in der Kopfzeile, Alt + A, Akzentfarbe, Ersatz-Stream in der besten werbefreien Qualität',
     en: 'new minimal glass layout with an icon bar (hover = label), ad status in the top row, Alt + A, accent colour, replacement stream in the best ad-free quality',
   };
 
-  // Datum in Ortszeit (für „Heute“ und den Verlauf)
+  // Date in local time (for "today" and the history)
   function dayKey(d) {
     d = d || new Date();
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
@@ -876,7 +876,7 @@
     } catch (e) { return fallback; }
   }
   function saveJson(key, value) {
-    try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* egal */ }
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* doesn't matter */ }
   }
 
   function loadStats() {
@@ -884,20 +884,20 @@
     for (const k of ['total', 'today', 'leaked', 'savedTotal', 'savedToday']) {
       if (typeof s[k] !== 'number') s[k] = 0;
     }
-    if (!s.days || typeof s.days !== 'object') s.days = {};         // Tag -> { ads, saved }
-    if (!s.channels || typeof s.channels !== 'object') s.channels = {}; // Kanal -> { ads, saved, leaked }
+    if (!s.days || typeof s.days !== 'object') s.days = {};         // day -> { ads, saved }
+    if (!s.channels || typeof s.channels !== 'object') s.channels = {}; // channel -> { ads, saved, leaked }
     if (s.day !== today()) { s.day = today(); s.today = 0; s.savedToday = 0; }
     return s;
   }
   function saveStats(s) {
-    // Verlauf auf 30 Tage begrenzen
+    // keep at most 30 days of history
     const keys = Object.keys(s.days).sort();
     for (const k of keys.slice(0, Math.max(0, keys.length - 30))) delete s.days[k];
     saveJson(STATS_KEY, s);
   }
   const emptyStats = () => ({ total: 0, today: 0, leaked: 0, savedTotal: 0, savedToday: 0, day: today(), days: {}, channels: {} });
 
-  // Summe der letzten n Tage (ab heute rückwärts, optional ab einem anderen Starttag)
+  // Sum of the last n days (counting back from today, optionally from another start day)
   function sumDays(s, n, from) {
     const out = { ads: 0, saved: 0 };
     for (let i = 0; i < n; i++) {
@@ -924,12 +924,12 @@
   }
 
   const box = Object.assign({ x: null, y: null, locked: false, expanded: false, sync: false, section: null }, loadJson(BOX_KEY, {}));
-  // Im Panel ist immer nur ein Bereich offen: 'stats' | 'settings' | 'help' | null
+  // Only one area of the panel is open at a time: 'stats' | 'settings' | 'help' | null
   delete box.settingsOpen;
   delete box.statsOpen;
   const saveBox = () => saveJson(BOX_KEY, box);
 
-  // Einstellungen (ältere Versionen hatten den Notfall-Modus in der Box gespeichert)
+  // Settings (older versions stored emergency mode in the box state)
   function loadSettings() {
     const s = Object.assign({}, CONFIG.defaults, loadJson(SETTINGS_KEY, {}));
     if (loadJson(SETTINGS_KEY, null) === null && typeof box.emergency === 'boolean') s.emergency = box.emergency;
@@ -939,7 +939,7 @@
   const saveSettings = () => saveJson(SETTINGS_KEY, settings);
 
   // ---------------------------------------------------------------------------
-  // Texte Deutsch / Englisch
+  // Texts German / English
   // ---------------------------------------------------------------------------
   const TEXT = {
     de: {
@@ -1434,7 +1434,7 @@
   }
   const t = (key) => TEXT[lang()][key];
 
-  // Dauer kurz formatieren: 45 s · 12 min · 1 h 13 min
+  // Short duration format: 45 s · 12 min · 1 h 13 min
   function fmtDur(sec) {
     sec = Math.round(sec || 0);
     if (sec < 60) return sec + ' s';
@@ -1448,7 +1448,7 @@
     return mode === 'backup' ? t('modeBackup') : mode === 'stripped' ? t('modeStripped') : '?';
   }
 
-  // Versionen vergleichen: > 0, wenn a neuer ist als b
+  // Compare versions: > 0 if a is newer than b
   function cmpVersion(a, b) {
     const pa = String(a).split('.').map(Number);
     const pb = String(b).split('.').map(Number);
@@ -1460,13 +1460,13 @@
   }
 
   let sessionCount = 0;
-  let workerSeen = false; // hat sich der Video-Worker in diesem Tab gemeldet?
-  let lastAd = null;      // { time, channel, mode } der letzten Werbepause in diesem Tab
-  let lastAdMsg = 0;      // Zeitpunkt der letzten Werbe-Meldung des Workers
-  let lastAdEnd = 0;      // Zeitpunkt, an dem die letzte Werbepause endete
-  const adBreak = { sources: new Set(), seconds: 0 }; // laufende Pause über alle Worker/Playlists
+  let workerSeen = false; // has the video worker reported in this tab?
+  let lastAd = null;      // { time, channel, mode } of the last ad break in this tab
+  let lastAdMsg = 0;      // time of the worker's last ad message
+  let lastAdEnd = 0;      // time the last ad break ended
+  const adBreak = { sources: new Set(), seconds: 0 }; // running break across all workers/playlists
 
-  // Status in der Kopfzeile (statt Pop-up): { text, cls: 'live' | 'done', until }
+  // Status in the top row (instead of a pop-up): { text, cls: 'live' | 'done', until }
   let headStatus = null;
   let headStatusTimer = null;
   function setHeadStatus(text, cls, ms) {
@@ -1476,7 +1476,7 @@
     renderCounter();
   }
 
-  // Werbepause abschließen: einmal protokollieren, gesparte Zeit gutschreiben
+  // Finish an ad break: log it once, credit the time saved
   function finishAdBreak() {
     adBreak.sources.clear();
     lastAdMsg = 0;
@@ -1485,14 +1485,14 @@
     logEvent('info', 'adBreak', { mode: lastAd ? lastAd.mode : null, seconds });
     addSavedTime(seconds);
     setHeadStatus(seconds > 0 ? t('headAdDone')(fmtDur(seconds)) : null, 'done', 5000);
-    // Pop-up nur im Vollbild (dort ist die Box nicht sichtbar)
+    // pop-up only in fullscreen (the box isn't visible there)
     if (seconds > 0 && document.fullscreenElement) showNotice(t('noticeSaved')(fmtDur(seconds)), 4000);
     else showNotice(null);
   }
   let notice = null;
   let noticeTimer = null;
   let ui = {};
-  let panelHeight = 0;     // aktuelle Höhe des Panels (beim Aufklappen: halbe Fensterhöhe)
+  let panelHeight = 0;     // current panel height (when expanding: half the window height)
   let wasExpanded = false;
 
   function el(tag, cls, text) {
@@ -1521,7 +1521,7 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Ereignis-Protokoll (Fehler, Stream-Status, Werbepausen) – für die Fehlersuche
+  // Event log (errors, stream status, ad breaks) – for troubleshooting
   // ---------------------------------------------------------------------------
   function loadEvents() {
     const e = loadJson(EVENTS_KEY, []);
@@ -1533,7 +1533,7 @@
       const events = loadEvents();
       const entry = { t: Date.now(), level, code, data: data || {}, ch: currentChannel() };
       const last = events[0];
-      // gleiches Ereignis kurz hintereinander nur hochzählen
+      // the same event shortly after another is only counted up
       if (last && last.code === code && last.level === level && last.ch === entry.ch
           && JSON.stringify(last.data) === JSON.stringify(entry.data) && entry.t - last.t < 60 * 1000) {
         last.n = (last.n || 1) + 1;
@@ -1543,7 +1543,7 @@
       }
       saveJson(EVENTS_KEY, events.slice(0, MAX_EVENTS));
       if (ui.root && box.expanded && (level !== 'info' || settings.devMode)) renderCounter();
-    } catch (e) { /* Protokoll darf nie das Script stören */ }
+    } catch (e) { /* the log must never break the script */ }
   }
 
   function eventText(e) {
@@ -1558,10 +1558,10 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Box: Position, Zustände
+  // Box: position, states
   // ---------------------------------------------------------------------------
 
-  // Box im sichtbaren Bereich halten (z. B. nach Verkleinern des Fensters oder Aufklappen)
+  // Keep the box inside the visible area (e.g. after shrinking the window or expanding)
   function placeCounter() {
     if (!ui.root) return;
     const w = ui.root.offsetWidth;
@@ -1572,7 +1572,7 @@
     y = Math.max(0, Math.min(y, window.innerHeight - h));
     ui.root.style.left = x + 'px';
     ui.root.style.top = y + 'px';
-    // Sitzt die Box unten am Rand, kommt der Größen-Griff nach oben (nicht während des Ziehens umschalten)
+    // If the box sits at the bottom edge, the resize grip moves to the top (don't switch while dragging)
     if (!ui.root.classList.contains('resizing')) {
       ui.root.classList.toggle('grip-top', y + h >= window.innerHeight - 24);
     }
@@ -1580,7 +1580,7 @@
   }
   window.addEventListener('resize', () => { applyPanelHeight(); placeCounter(); });
 
-  // Beschriftung, die beim Überfahren eines Icons erscheint (statt des langsamen Browser-Tooltips)
+  // Label shown when hovering over an icon (instead of the slow browser tooltip)
   function setTip(btn, text) {
     btn.dataset.tip = text;
     btn.setAttribute('aria-label', text);
@@ -1626,7 +1626,7 @@
       if (!start) return;
       start = null;
       ui.root.classList.remove('dragging');
-      // tatsächliche (ggf. begrenzte) Position speichern; nah am Rand → an den Rand einrasten
+      // save the actual (possibly clamped) position; close to an edge → snap to the edge
       const SNAP = 40;
       const GAP = 12;
       const w = ui.root.offsetWidth;
@@ -1648,7 +1648,7 @@
     ui.head.addEventListener('pointercancel', end);
   }
 
-  // Panel-Höhe: höchstens Fensterhöhe minus Kopfzeile
+  // Panel height: at most the window height minus the top row
   function maxPanelHeight() {
     const headH = ui.head ? ui.head.offsetHeight : 28;
     return Math.max(80, window.innerHeight - headH - 24);
@@ -1664,7 +1664,7 @@
     let start = null;
     ui.grip.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return;
-      // Griff oben (Box sitzt unten): nach oben ziehen = größer
+      // grip at the top (box sits at the bottom): drag up = bigger
       const dir = ui.root.classList.contains('grip-top') ? -1 : 1;
       start = { y: e.clientY, h: ui.panel.getBoundingClientRect().height, dir };
       ui.grip.setPointerCapture(e.pointerId);
@@ -1687,8 +1687,8 @@
     });
   }
 
-  // Bestätigung direkt im Button statt confirm()-Dialog (der kann vom Browser
-  // unterdrückt werden): 1. Klick = „Sicher?“, 2. Klick innerhalb 4 s = ausführen
+  // Confirmation inside the button instead of a confirm() dialog (which the browser
+  // may suppress): 1st click = "Sure?", 2nd click within 4 s = run
   function confirmClick(btn, action) {
     let armed = false;
     let timer = null;
@@ -1722,7 +1722,7 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Protokoll-Text, Zeitstempel, Zwischenablage
+  // Log text, timestamp, clipboard
   // ---------------------------------------------------------------------------
   function reportsAsText() {
     const s = loadStats();
@@ -1752,8 +1752,8 @@
     return lines.join('\n');
   }
 
-  // Text für eine manuelle Meldung, z. B.
-  // "Werbung nicht blockiert – 17.10.2026 16:23:05 – Kanal: xyz – letzte Methode: Ersatz-Stream (vor 40 s) – Script 2.0.0"
+  // Text for a manual report, e.g.
+  // "Ad not blocked – 17.10.2026 16:23:05 – channel: xyz – last method: replacement stream (40 s ago) – script 2.0.0"
   function reportStamp() {
     const now = new Date();
     const recent = lastAd && Date.now() - lastAd.time < 5 * 60 * 1000 ? lastAd : null;
@@ -1781,23 +1781,23 @@
     return ok;
   }
 
-  // Zeitstempel: nur in die Zwischenablage, nichts speichern
+  // Timestamp: clipboard only, nothing is saved
   async function doStamp() {
     const ok = await copyText(reportStamp());
     flashButton(ui.stamp, ok ? t('copied') : t('failed'));
     if (!ui.root || !box.expanded || !settings.devMode || document.fullscreenElement) showNotice(ok ? reportStamp() : t('failed'), 4000);
   }
-  // Durchgerutscht: im Protokoll speichern und Zähler +1
+  // Slipped through: save to the log and counter +1
   function doLeak() {
     addReport(false);
     flashButton(ui.leak, t('saved'));
     if (!ui.root || !box.expanded || document.fullscreenElement) showNotice(t('leak') + ' – ' + t('saved'), 3000);
   }
-  // Ist Sync an, löst jeder der beiden Buttons auch den anderen aus
+  // With sync on, each of the two buttons also triggers the other one
   const pressStamp = () => { doStamp(); if (box.sync) doLeak(); };
   const pressLeak = () => { doLeak(); if (box.sync) doStamp(); };
 
-  // Protokoll kopieren und Fehler-Formular auf GitHub öffnen
+  // Copy the log and open the bug report form on GitHub
   async function reportBug() {
     const ok = await copyText(reportsAsText());
     window.open(ISSUE_URL, '_blank', 'noopener');
@@ -1805,7 +1805,7 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Updates und „Was ist neu“
+  // Updates and "what's new"
   // ---------------------------------------------------------------------------
   function updateInfo() {
     const u = loadJson(UPDATE_KEY, {});
@@ -1836,7 +1836,7 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Sichern / Wiederherstellen
+  // Backup / restore
   // ---------------------------------------------------------------------------
   function exportData() {
     const data = {
@@ -1851,7 +1851,7 @@
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
   }
 
-  // Verlauf pro Tag und Kanäle als CSV (Semikolon + BOM, damit Excel Umlaute und Spalten erkennt)
+  // History per day and channels as CSV (semicolon + BOM so Excel detects umlauts and columns)
   function exportCsv() {
     const s = loadStats();
     const cell = (v) => '"' + String(v).replace(/"/g, '""') + '"';
@@ -1872,11 +1872,11 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Selbsttest: prüft live, ob alle Teile funktionieren
+  // Self-test: checks live whether all parts work
   // ---------------------------------------------------------------------------
   let lastSelfTest = null;
   let selfTestResolve = null;
-  let mainBc = null; // BroadcastChannel zur Kommunikation mit dem Video-Worker
+  let mainBc = null; // BroadcastChannel for talking to the video worker
 
   async function runSelfTest() {
     const results = [];
@@ -1887,16 +1887,16 @@
     add(!!v && !v.paused, t('stPlayer'), v ? (v.paused ? t('stPaused') : t('stRunning')) : '–');
     add(workerSeen, t('stWorker'));
 
-    // Worker fragen: kennt er die Stream-Liste, bekommt er einen Ersatz-Stream von Twitch?
-    // Twitch hat oft mehrere Worker: alle Antworten sammeln und die beste nehmen
-    // (der Worker, der die Stream-Liste kennt und einen Ersatz-Stream bekommt)
+    // Ask the worker: does it know the stream list, does it get a replacement stream from Twitch?
+    // Twitch often has several workers: collect all answers and take the best one
+    // (the worker that knows the stream list and gets a replacement stream)
     const answers = [];
     selfTestResolve = (msg) => answers.push(msg);
-    try { if (mainBc) mainBc.postMessage({ tabId: CONFIG.tabId, type: 'selftest' }); } catch (e) { /* egal */ }
+    try { if (mainBc) mainBc.postMessage({ tabId: CONFIG.tabId, type: 'selftest' }); } catch (e) { /* doesn't matter */ }
     for (let i = 0; i < 40 && !(answers.length && Date.now() && answers.some((a) => a.streamsKnown && a.backup !== undefined)); i++) {
       await new Promise((r) => setTimeout(r, 250));
     }
-    if (answers.length) await new Promise((r) => setTimeout(r, 1000)); // Nachzügler abwarten
+    if (answers.length) await new Promise((r) => setTimeout(r, 1000)); // wait for late answers
     selfTestResolve = null;
     const score = (a) => (a.streamsKnown ? 2 : 0) + (a.backup ? 1 : 0);
     const res = answers.sort((a, b) => score(b) - score(a))[0] || null;
@@ -1936,7 +1936,7 @@
     placeCounter();
   }
 
-  // Box im Leerlauf blass: nach 4 s ohne Maus (nur zugeklappt)
+  // Fade the box when idle: after 4 s without the mouse (collapsed only)
   let idleTimer = null;
   function scheduleIdle() {
     clearTimeout(idleTimer);
@@ -1969,7 +1969,7 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Panel aufbauen
+  // Build the panel
   // ---------------------------------------------------------------------------
   function setEmergency(on) {
     settings.emergency = !!on;
@@ -1989,7 +1989,7 @@
     renderCounter();
   }
 
-  // Klappbare Überschrift: Klick klappt den Abschnitt auf/zu, Zustand wird gespeichert
+  // Collapsible heading: a click expands/collapses the section, the state is saved
   function foldSection(key, title, defaultOpen) {
     const head = el('button', 'ttv-ab-foldhead');
     const label = el('span', '', title);
@@ -2013,7 +2013,7 @@
     return { head, body, label };
   }
 
-  // Bereich im Panel öffnen/schließen (immer nur einer offen)
+  // Open/close an area in the panel (only one open at a time)
   function toggleSection(name) {
     box.section = box.section === name ? null : name;
     saveBox();
@@ -2051,7 +2051,7 @@
     check('onlyChannel', t('setOnlyChannel'), t('setOnlyChannelHint'));
     check('autoClose', t('setAutoClose'), t('setAutoCloseHint'));
     check('weekly', t('setWeekly'), t('setWeeklyHint'));
-    // Akzentfarbe
+    // accent colour
     const accRow = el('label', 'ttv-ab-setting ttv-ab-lang');
     const accSel = el('select');
     for (const [val, label] of Object.entries(t('accentNames'))) {
@@ -2093,7 +2093,7 @@
     check('hidePrime', t('setHidePrime'));
     check('stopFrontpage', t('setStopFront'));
 
-    // Sichern / Wiederherstellen
+    // backup / restore
     group('setBackup', t('groupBackup'));
     const backup = el('div', 'ttv-ab-actions');
     const exportBtn = el('button', '', t('exportBtn'));
@@ -2113,7 +2113,7 @@
     backup.append(exportBtn, ui.importBtn, csvBtn, file);
     current.append(backup);
 
-    // Einstellungen auf Standard (Zähler, Verlauf und Protokoll bleiben)
+    // Settings back to default (counters, history and log are kept)
     const resetRow = el('div', 'ttv-ab-actions ttv-ab-danger');
     const resetBtn = el('button', '', t('resetSettings'));
     resetBtn.title = t('resetSettingsTitle');
@@ -2141,7 +2141,7 @@
   }
 
   function renderStats(s) {
-    // 7-Tage-Balken
+    // 7-day bars
     ui.chart.replaceChildren();
     const days = [];
     for (let i = 6; i >= 0; i--) {
@@ -2161,7 +2161,7 @@
       col.children[1].append(fill);
       ui.chart.append(col);
     }
-    // Top-Kanäle
+    // top channels
     ui.channels.replaceChildren();
     const top = Object.entries(s.channels).sort((a, b) => (b[1].ads || 0) - (a[1].ads || 0)).slice(0, 5);
     if (!top.length) ui.channels.append(el('li', 'ttv-ab-muted', t('noData')));
@@ -2176,7 +2176,7 @@
     ui.root = el('div');
     ui.root.id = 'ttv-adblock-counter';
 
-    // Kopfzeile schlicht: Zähler, Auf-/Zuklappen (dazu ⬆ bei Update)
+    // Minimal top row: counter, expand/collapse (plus ⬆ when an update is available)
     ui.head = el('div', 'ttv-ab-head');
     ui.shield = el('span', 'ttv-ab-shield', '🛡');
     ui.shield.title = t('shieldTitle');
@@ -2184,7 +2184,7 @@
     ui.update = el('button', 'ttv-ab-icon ttv-ab-update', '⬆');
     ui.toggle = el('button', 'ttv-ab-icon ttv-ab-toggle');
     ui.head.append(ui.shield, ui.text, ui.update, ui.toggle);
-    // Doppelklick auf 🛡: Box zurück an die Standardposition (unten links)
+    // double-click 🛡: box back to its default position (bottom left)
     ui.shield.addEventListener('dblclick', (e) => {
       e.stopPropagation();
       box.x = null;
@@ -2192,7 +2192,7 @@
       saveBox();
       placeCounter();
     });
-    // Notfall-Modus und Schloss sitzen in der Icon-Leiste im Panel
+    // emergency mode and lock live in the panel's icon bar
     ui.emergency = el('button', 'ttv-ab-tool ttv-ab-emergency', '🛟');
     ui.lock = el('button', 'ttv-ab-tool');
     ui.head.addEventListener('dblclick', (e) => {
@@ -2204,7 +2204,7 @@
 
     // Panel
     ui.panel = el('div', 'ttv-ab-panel');
-    // Kacheln: das Wichtigste groß
+    // Tiles: the most important numbers, big
     const tiles = el('div', 'ttv-ab-tiles');
     const tile = (label, cls, onClick) => {
       const v = el('b', cls || '', '0');
@@ -2219,12 +2219,12 @@
       v.label = lbl;
       return v;
     };
-    // Kacheln „heute“ und „gespart“ lassen sich antippen: heute ↔ 7 Tage, gesamt ↔ heute
+    // the "today" and "saved" tiles can be clicked: today ↔ 7 days, total ↔ today
     ui.tToday = tile(t('tileToday'), '', () => { box.tileToday = box.tileToday === 'week' ? 'today' : 'week'; saveBox(); renderCounter(); });
     ui.tTotal = tile(t('tileTotal'));
     ui.tSaved = tile(t('tileSaved'), 'good', () => { box.tileSaved = box.tileSaved === 'today' ? 'total' : 'today'; saveBox(); renderCounter(); });
     ui.leakNote = el('div', 'ttv-ab-leaknote');
-    // Ausführliche Zahlen im Dev-Tab
+    // detailed numbers in the dev tab
     const stats = el('div', 'ttv-ab-stats');
     const row = (label, cls, dev) => {
       const k = el('span', dev ? 'ttv-ab-dev' : '', label);
@@ -2238,8 +2238,8 @@
     ui.last = el('div', 'ttv-ab-muted');
     ui.issue = el('div', 'ttv-ab-issue');
 
-    // Melde-Zeile: [Zeitstempel] [Durchgerutscht] [Sync] – im Dev-Tab
-    // (sonst: automatische Erkennung und Alt+W)
+    // report row: [timestamp] [slipped through] [sync] – in the dev tab
+    // (otherwise: automatic detection and Alt+W)
     ui.reportRow = el('div', 'ttv-ab-reportrow');
     ui.stamp = el('button', 'ttv-ab-stamp ttv-ab-dev', t('stamp'));
     ui.stamp.title = t('stampTitle');
@@ -2250,16 +2250,16 @@
 
     buildStats();
 
-    // Dev-Tab (🛠, nur im Dev-Modus): Status · Melden · Selbsttest · Protokolle · Werkzeuge
+    // Dev tab (🛠, dev mode only): status · report · self-test · logs · tools
     ui.devWrap = el('div', 'ttv-ab-fold ttv-ab-devtab');
     const leaks = foldSection('leaks', '', true);
-    ui.listTitle = leaks.label; // Text mit Anzahl wird beim Rendern gesetzt
+    ui.listTitle = leaks.label; // text with the count is set when rendering
     ui.list = el('ul');
     leaks.body.append(ui.list);
     const events = foldSection('events', t('eventsTitle'), true);
     ui.events = el('ul', 'ttv-ab-events');
     events.body.append(ui.events);
-    // Werkzeuge: Kopieren getrennt von den Lösch-Knöpfen
+    // tools: copying kept apart from the delete buttons
     const tools = foldSection('devtools', t('devTools'), true);
     const copyRow = el('div', 'ttv-ab-actions');
     ui.copy = el('button', '', t('copyLog'));
@@ -2271,7 +2271,7 @@
     ui.reset = el('button', '', t('resetAll'));
     dangerRow.append(ui.clearEvents, ui.clear, ui.reset);
     tools.body.append(copyRow, dangerRow);
-    // Selbsttest
+    // self-test
     const st = foldSection('selftest', t('selftestTitleList'), true);
     ui.selftestBtn = el('button', 'ttv-ab-wide ttv-ab-selftest', t('selftestBtn'));
     ui.selftestBtn.title = t('selftestTitle');
@@ -2291,7 +2291,7 @@
     ui.devWrap.append(status, ui.reportRow, st.head, st.body, leaks.head, leaks.body,
       events.head, events.body, tools.head, tools.body);
 
-    // Bereich „Hilfe“ (🐞): Fehler melden, Updates
+    // "Help" area (🐞): report a problem, updates
     ui.helpWrap = el('div', 'ttv-ab-fold');
     const mainActions = el('div', 'ttv-ab-actions');
     ui.reportBug = el('button', '', t('reportBug'));
@@ -2302,7 +2302,7 @@
 
     buildSettings();
 
-    // Icon-Leiste: 📊 Verlauf · 🛟 Notfall · 🔒 Schloss · 🐞 Hilfe · 🛠 Dev (nur im Dev-Modus) · ⚙ Einstellungen
+    // Icon bar: 📊 history · 🛟 emergency · 🔒 lock · 🐞 help · 🛠 dev (dev mode only) · ⚙ settings
     ui.toolbar = el('div', 'ttv-ab-toolbar');
     ui.dev = el('button', 'ttv-ab-tool ttv-ab-devtool', '🛠');
     setTip(ui.dev, t('tipDev'));
@@ -2315,7 +2315,7 @@
     setTip(ui.settingsTool, t('tipSettings'));
     ui.toolbar.append(ui.statsTool, ui.emergency, ui.lock, ui.helpTool, ui.dev, ui.settingsTool);
     ui.statsTool.addEventListener('click', () => toggleSection('stats'));
-    // Versteckt: 5× schnell auf 🐞 schaltet den Dev-Modus an/aus
+    // hidden: clicking 🐞 five times quickly turns dev mode on/off
     let bugClicks = [];
     ui.helpTool.addEventListener('click', () => {
       const now = Date.now();
@@ -2333,7 +2333,7 @@
     });
     ui.settingsTool.addEventListener('click', () => toggleSection('settings'));
 
-    // Fußzeile mit Version
+    // Footer with version
     ui.footer = el('div', 'ttv-ab-footer');
     ui.versionText = el('span', '', t('version')(VERSION));
     const news = el('a', '', t('whatsNewLink'));
@@ -2343,14 +2343,14 @@
     ui.footer.append(ui.versionText, document.createTextNode(' · '), news);
 
     ui.panel.append(tiles, ui.leakNote, ui.toolbar, ui.statsWrap, ui.helpWrap, ui.devWrap, ui.settingsWrap, ui.footer);
-    // Griff unten: Höhe des Panels frei ziehen, Doppelklick = wieder halbe Fensterhöhe
+    // Grip at the bottom: drag to change the panel height, double-click = back to half the window height
     ui.grip = el('div', 'ttv-ab-grip');
     ui.grip.title = t('gripTitle');
     makeResizable();
     ui.root.append(ui.head, ui.panel, ui.grip);
     document.body.appendChild(ui.root);
 
-    // Ereignisse
+    // events
     ui.toggle.addEventListener('click', () => {
       box.expanded = !box.expanded;
       saveBox();
@@ -2371,7 +2371,7 @@
       saveBox();
       updateSync();
     });
-    // Bei aktivem Sync beim Überfahren beide Buttons hervorheben
+    // with sync on, highlight both buttons on hover
     for (const [a, b] of [[ui.stamp, ui.leak], [ui.leak, ui.stamp]]) {
       a.addEventListener('mouseenter', () => { if (box.sync) b.classList.add('pair-hover'); });
       a.addEventListener('mouseleave', () => b.classList.remove('pair-hover'));
@@ -2382,7 +2382,7 @@
     ui.reportBug.addEventListener('click', reportBug);
     ui.checkUpdate.addEventListener('click', async () => {
       const v = await checkUpdate();
-      if (v === null) openUpdate(); // Prüfung blockiert? Dann direkt die Update-Seite öffnen
+      if (v === null) openUpdate(); // check blocked? Then open the update page directly
       else if (cmpVersion(v, VERSION) > 0) flashButton(ui.checkUpdate, t('updateAvail')(v).split(' – ')[0]);
       else flashButton(ui.checkUpdate, t('upToDate') + ' (' + VERSION + ')');
     });
@@ -2417,7 +2417,7 @@
     makeDraggable();
   }
 
-  // Box komplett neu aufbauen (z. B. nach Sprachwechsel)
+  // Rebuild the box completely (e.g. after changing the language)
   function rebuildCounter() {
     if (ui.root) ui.root.remove();
     ui = {};
@@ -2430,7 +2430,7 @@
     const s = loadStats();
     const upd = settings.updateCheck ? updateInfo() : null;
 
-    // Laufende/gerade beendete Werbepause steht direkt in der Kopfzeile
+    // a running / just finished ad break is shown right in the top row
     const status = headStatus && (!headStatus.until || Date.now() < headStatus.until) ? headStatus : null;
     ui.text.textContent = status ? status.text
       : !settings.showCounter ? ''
@@ -2438,11 +2438,11 @@
     ui.root.classList.toggle('status', !!status);
     ui.root.classList.toggle('adlive', !!status && status.cls === 'live');
     ui.root.classList.toggle('addone', !!status && status.cls === 'done');
-    // Mini-Modus: zugeklappt nur 🛡 (auch außerhalb von Kanal-Seiten, falls eingestellt)
+    // mini mode: collapsed only 🛡 (also outside channel pages, if set)
     ui.root.classList.toggle('mini', !box.expanded && (!!settings.mini || (!!settings.onlyChannel && !currentChannel())));
     ui.head.title = t('headFull')(s.total, fmtDur(s.savedTotal)) + '\n' + t('version')(VERSION) + '\n' + (box.locked ? t('headLocked') : t('headDrag'));
     ui.root.classList.toggle('expanded', !!box.expanded);
-    // Beim Aufklappen automatisch auf die halbe Fensterhöhe stellen, danach frei verstellbar
+    // When expanding, start at half the window height, then freely adjustable
     if (box.expanded && !wasExpanded) panelHeight = halfPanelHeight();
     wasExpanded = !!box.expanded;
     applyPanelHeight();
@@ -2453,7 +2453,7 @@
     ui.update.hidden = !upd;
     if (upd) ui.update.title = t('updateAvail')(upd);
     ui.dev.hidden = !settings.devMode;
-    // Punkt am 🛠, wenn es ein aktuelles Problem gibt
+    // dot on 🛠 when there is a current problem
     ui.dev.classList.toggle('alert', !!settings.devMode && !!lastIssue());
     const section = box.section === 'dev' && !settings.devMode ? null : box.section;
     for (const [name, wrap, tool] of [['stats', ui.statsWrap, ui.statsTool], ['help', ui.helpWrap, ui.helpTool], ['dev', ui.devWrap, ui.dev], ['settings', ui.settingsWrap, ui.settingsTool]]) {
@@ -2527,7 +2527,7 @@
     renderCounter();
   }
 
-  // Durchgerutschte Werbung speichern (manuell oder automatisch erkannt)
+  // Save an ad that slipped through (reported manually or detected automatically)
   function addReport(auto) {
     const recent = lastAd && Date.now() - lastAd.time < 3 * 60 * 1000 ? lastAd : null;
     const channel = currentChannel() || (recent && recent.channel) || null;
@@ -2543,7 +2543,7 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Seiten-Optionen: Turbo/Prime ausblenden
+  // Page options: hide Turbo/Prime
   // ---------------------------------------------------------------------------
   function applyPageOptions() {
     const root = document.documentElement;
@@ -2557,7 +2557,7 @@
 
   if (document.body) renderCounter();
   else document.addEventListener('DOMContentLoaded', renderCounter, { once: true });
-  // Box aktualisieren, wenn ein anderer Twitch-Tab gezählt, gemeldet oder umgestellt hat
+  // Update the box when another Twitch tab counted, reported or changed settings
   window.addEventListener('storage', (e) => {
     if (e.key === STATS_KEY || e.key === REPORTS_KEY || e.key === UPDATE_KEY) renderCounter();
     if (e.key === SETTINGS_KEY) {
@@ -2575,8 +2575,8 @@
     renderCounter();
   }
 
-  // Tastenkürzel: Alt+A = Panel auf/zu, Alt+W = Durchgerutscht, Alt+Z = Zeitstempel,
-  // Esc = Panel schließen (nicht beim Tippen im Chat)
+  // Shortcuts: Alt+A = open/close panel, Alt+W = slipped through, Alt+Z = timestamp,
+  // Esc = close panel (not while typing in chat)
   window.addEventListener('keydown', (e) => {
     const tgt = e.target;
     if (tgt && (tgt.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(tgt.tagName))) return;
@@ -2591,14 +2591,14 @@
     else if (key === 'a') { e.preventDefault(); setExpanded(!box.expanded); }
   }, true);
 
-  // Klick außerhalb der Box schließt das Panel
+  // A click outside the box closes the panel
   document.addEventListener('pointerdown', (e) => {
     if (!settings.autoClose || !box.expanded || !ui.root || ui.root.contains(e.target)) return;
     if (notice && notice.contains(e.target)) return;
     setExpanded(false);
   }, true);
 
-  // Twitch wechselt Seiten ohne Neuladen: Box an die neue Seite anpassen (Mini außerhalb von Kanälen)
+  // Twitch changes pages without reloading: adapt the box to the new page (mini outside channels)
   let lastPath = location.pathname;
   setInterval(() => {
     if (location.pathname === lastPath) return;
@@ -2607,16 +2607,16 @@
   }, 1000);
 
   // ---------------------------------------------------------------------------
-  // Durchgerutschte Werbung erkennen + Notfall-Modus
+  // Detect ads that slip through + emergency mode
   // ---------------------------------------------------------------------------
-  // Zeigt Twitch seine eigene Werbe-Anzeige (Label/Countdown), hat der Player
-  // Werbung erkannt, die nicht entfernt wurde.
+  // If Twitch shows its own ad UI (label/countdown), the player has
+  // detected an ad that wasn't removed.
   const AD_UI_SELECTOR = '[data-a-target="video-ad-label"], [data-a-target="video-ad-countdown"]';
   let lastLeak = 0;
-  const emergency = { active: false, videos: new Map() }; // video -> war vorher stumm?
+  const emergency = { active: false, videos: new Map() }; // video -> was it muted before?
 
-  // Twitch zeigt zur Werbung zusätzlich Knöpfe („Werbung ⓘ“, „Weitere Informationen“)
-  // mit wechselnden Klassennamen – daher am Text erkennen und nur während der Werbung ausblenden
+  // During ads Twitch also shows buttons ("Ad ⓘ", "Learn more")
+  // with changing class names – so detect them by text and only hide them during the ad
   const AD_UI_TEXT = /^(werbung|anzeige|ad|ads|weitere informationen|mehr erfahren|learn more)$/i;
   function hideAdControls() {
     const player = document.querySelector('[data-a-target="video-player"]') || document.querySelector('.video-player');
@@ -2631,7 +2631,7 @@
     hideAdControls();
     for (const v of document.querySelectorAll('video')) {
       if (!emergency.videos.has(v)) emergency.videos.set(v, v.muted);
-      if (!v.muted) v.muted = true; // Twitch könnte den Ton wieder anschalten – jede Runde prüfen
+      if (!v.muted) v.muted = true; // Twitch might turn the sound back on – check every round
       v.classList.add('ttv-ab-blur');
       const host = v.parentElement;
       if (host && !host.querySelector(':scope > .ttv-ab-veil')) {
@@ -2659,7 +2659,7 @@
     if (adVisible && settings.emergency) emergencyOn();
     else if (emergency.active) emergencyOff();
 
-    // pro durchgerutschter Werbepause nur einmal melden
+    // report each slipped-through ad break only once
     if (!adVisible || Date.now() - lastLeak < 90 * 1000) return;
     if (!settings.autoDetect && !settings.emergency) return;
     lastLeak = Date.now();
@@ -2670,7 +2670,7 @@
   }, 500);
 
   // ---------------------------------------------------------------------------
-  // Überwachung: Video-/Player-Fehler, Video-Worker, hängendes Bild, Startseite
+  // Monitoring: video/player errors, video worker, frozen picture, front page
   // ---------------------------------------------------------------------------
   const watchedVideos = new WeakSet();
   const pageStart = Date.now();
@@ -2682,12 +2682,12 @@
     return document.querySelector('[data-a-target="video-player"] video') || document.querySelector('video');
   }
 
-  // Hängendes Bild reparieren: 1. zum Live-Bild springen, 2. Pause/Play, 3. Seite neu laden
+  // Repair a frozen picture: 1. jump to the live picture, 2. pause/play, 3. reload the page
   function checkFreeze() {
-    // Pause, deren Ende nie gemeldet wurde (z. B. Kanalwechsel mitten in der Werbung), abschließen
+    // close a break whose end was never reported (e.g. channel switch in the middle of an ad)
     if (adBreak.sources.size && Date.now() - lastAdMsg > 45 * 1000) finishAdBreak();
     const v = mainVideo();
-    const adRunning = Date.now() - lastAdMsg < 15 * 1000; // beim Herausschneiden steht das Bild absichtlich
+    const adRunning = Date.now() - lastAdMsg < 15 * 1000; // when cutting out, the picture freezes on purpose
     if (!settings.autoRecover || !v || !currentChannel() || v.paused || v.ended || document.hidden
         || adRunning || emergency.active || v.readyState === 0) {
       freeze.video = v; freeze.time = v ? v.currentTime : -1; freeze.since = Date.now(); freeze.step = 0;
@@ -2699,7 +2699,7 @@
       return;
     }
     const stuck = Date.now() - freeze.since;
-    // Direkt nach einer Werbepause (Wechsel zurück vom Ersatz-Stream) schneller reagieren
+    // react faster right after an ad break (switching back from the replacement stream)
     const firstStep = Date.now() - lastAdEnd < 30 * 1000 ? 4 * 1000 : 10 * 1000;
     if (freeze.step === 0 && stuck > firstStep) {
       logEvent('warn', 'freeze', { seconds: Math.round(stuck / 1000) });
@@ -2738,19 +2738,19 @@
         logEvent('error', 'videoError', { code: err.code || '?', message: err.message || '' });
       });
     }
-    // Twitch zeigt Player-Fehler als Text wie „Fehler #2000“ / „Error #4000“
+    // Twitch shows player errors as text like "Fehler #2000" / "Error #4000"
     const player = document.querySelector('[data-a-target="video-player"]') || document.querySelector('.video-player');
     const m = player && (player.textContent || '').match(/[^.\n]{0,80}(?:Fehler|Error)\s*#\s*\d{3,5}[^.\n]{0,40}/i);
     const text = m ? m[0].trim() : '';
     if (text && text !== lastPlayerError) logEvent('error', 'playerError', { text });
     lastPlayerError = text;
-    // Kein Video-Worker 20 s nach dem Laden, obwohl ein Video da ist
+    // No video worker 20 s after loading although there is a video
     if (!workerSeen && !noWorkerLogged && Date.now() - pageStart > 20 * 1000
         && currentChannel() && document.querySelector('video')) {
       noWorkerLogged = true;
       logEvent('warn', 'noWorker', {});
     }
-    // Startseite: automatisch startendes Video stoppen
+    // front page: stop the autoplaying video
     if (settings.stopFrontpage && location.pathname === '/') {
       for (const v of document.querySelectorAll('video')) {
         if (!v.paused) { v.muted = true; v.pause(); }
@@ -2760,11 +2760,11 @@
   }, 2000);
 
   // ---------------------------------------------------------------------------
-  // Hinweis direkt über der Box (oder darunter, wenn oben kein Platz ist)
+  // Notice right above the box (or below it if there's no room above)
   // ---------------------------------------------------------------------------
   function placeNotice() {
     if (!notice) return;
-    if (document.fullscreenElement) return; // im Vollbild oben mittig per CSS
+    if (document.fullscreenElement) return; // in fullscreen: top centre via CSS
     if (!ui.root) {
       notice.style.left = '12px';
       notice.style.top = (window.innerHeight - notice.offsetHeight - 12) + 'px';
@@ -2778,7 +2778,7 @@
     notice.style.top = top + 'px';
   }
 
-  // Im Vollbild zeigt der Browser nur den Player – der Hinweis muss dann dort hinein
+  // In fullscreen the browser only shows the player – the notice has to go in there
   function attachNotice() {
     if (!notice) return;
     const host = document.fullscreenElement || document.body;
@@ -2807,14 +2807,14 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Meldungen aus dem Video-Worker
+  // Messages from the video worker
   // ---------------------------------------------------------------------------
   if (typeof BroadcastChannel !== 'undefined') {
     const bc = new BroadcastChannel(CONFIG.channelName);
     mainBc = bc;
     bc.onmessage = (e) => {
       const msg = e.data || {};
-      if (msg.tabId !== CONFIG.tabId) return; // Meldung aus einem anderen Tab
+      if (msg.tabId !== CONFIG.tabId) return; // message from another tab
       if (msg.type === 'selftest-result') {
         if (selfTestResolve) selfTestResolve(msg);
       } else if (msg.type === 'log') {
@@ -2823,7 +2823,7 @@
         logEvent(level, code, data);
       } else if (msg.type === 'ad-start') {
         lastAdMsg = Date.now();
-        // Mehrere Worker/Playlists melden dieselbe Pause: nur die erste Meldung zählt
+        // Several workers/playlists report the same break: only the first message counts
         if (!adBreak.sources.size) {
           adBreak.seconds = 0;
           lastAd = { time: Date.now(), channel: currentChannel(), mode: null };
@@ -2833,13 +2833,13 @@
       } else if (msg.type === 'ad') {
         lastAdMsg = Date.now();
         lastAd = lastAd || { time: Date.now() };
-        // „Ersatz-Stream“ hat Vorrang, wenn mehrere Playlists unterschiedlich behandelt werden
+        // "replacement stream" wins if several playlists are handled differently
         if (lastAd.mode !== 'backup' || msg.mode === 'backup') lastAd.mode = msg.mode;
         if (msg.quality) lastAd.quality = msg.quality;
         if (msg.channel) lastAd.channel = msg.channel;
         const backup = lastAd.mode === 'backup';
         setHeadStatus(backup ? t('headAdBackup')(lastAd.quality) : t('headAdStrip'), 'live', 0);
-        // Pop-up nur, wenn es etwas zu wissen gibt (Bild kann stehen bleiben) oder im Vollbild
+        // pop-up only when there is something to know (picture may freeze) or in fullscreen
         if (!backup || document.fullscreenElement) {
           showNotice(backup
             ? (lastAd.quality && lastAd.quality !== '?' ? t('noticeBackupQ')(lastAd.quality) : t('noticeBackup'))
@@ -2854,7 +2854,7 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Start: „Was ist neu“, Update-Prüfung
+  // Start: "what's new", update check
   // ---------------------------------------------------------------------------
   logEvent('info', 'start', { version: VERSION });
   (function startup() {
@@ -2873,7 +2873,7 @@
     if (settings.updateCheck && Date.now() - (upd.checked || 0) > 24 * 3600 * 1000) {
       setTimeout(checkUpdate, 15 * 1000);
     }
-    // Wochen-Rückblick: in einer neuen Woche einmal die Zahlen der Vorwoche (Mo–So) zeigen
+    // Weekly recap: in a new week, show last week's numbers (Mon–Sun) once
     const monday = new Date();
     monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
     const thisWeek = dayKey(monday);
