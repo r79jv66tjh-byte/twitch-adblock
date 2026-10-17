@@ -3,7 +3,8 @@
 // @namespace    local.twitch-adblock
 // @version      1.6.0
 // @description  Umgeht Pre-/Mid-Roll-Werbung im Twitch-Stream (Playlist-Austausch) und blendet Werbebanner aus.
-// @homepageURL  https://github.com/r79jv66tjh-byte/twitch-adblock
+// @license      MIT
+// @homepageURL https://github.com/r79jv66tjh-byte/twitch-adblock
 // @supportURL   https://github.com/r79jv66tjh-byte/twitch-adblock/issues
 // @updateURL    https://raw.githubusercontent.com/r79jv66tjh-byte/twitch-adblock/main/twitch-adblock.user.js
 // @downloadURL  https://raw.githubusercontent.com/r79jv66tjh-byte/twitch-adblock/main/twitch-adblock.user.js

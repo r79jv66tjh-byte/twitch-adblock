@@ -98,6 +98,11 @@ Alles bleibt **nur lokal in deinem Browser**. Es wird nichts an Twitch oder irge
 |---|---|
 | `twitch-adblock.user.js` | Das Userscript |
 | `README.md` | Diese Anleitung |
+| `LICENSE` | MIT-Lizenz |
+
+## Lizenz
+
+[MIT](LICENSE) – frei nutzbar, veränderbar und weitergebbar, solange der Lizenzhinweis erhalten bleibt. Ohne jede Gewähr.
 
 ## Neue Version veröffentlichen (für den Repo-Besitzer)
 
