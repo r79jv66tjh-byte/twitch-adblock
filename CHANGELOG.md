@@ -3,6 +3,11 @@
 🇬🇧 English / 🇩🇪 Deutsch – each entry is listed in both languages.
 Format: [Keep a Changelog](https://keepachangelog.com/), versions: [SemVer](https://semver.org/).
 
+## [2.0.5] – 2026-10-17
+
+- EN: The expanded panel automatically opens at half the window height and scrolls; the grip at the bottom changes the height freely (double-click = back to half); never taller than the window
+- DE: Das aufgeklappte Panel öffnet sich automatisch auf halber Fensterhöhe und scrollt; mit dem Griff unten lässt sich die Höhe frei verstellen (Doppelklick = wieder halbe Höhe); nie höher als das Fenster
+
 ## [2.0.4] – 2026-10-17
 
 - EN: All headings in the panel can be expanded/collapsed (settings groups Display, Blocker, Extras, Backup & restore; history; channels; slipped-through log; events) – the state is saved. Settings groups start collapsed.

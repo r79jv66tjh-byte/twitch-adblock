@@ -73,6 +73,7 @@ Unten links zeigt die Box z. B. **„🛡 42 Werbepausen · 1 h 13 min gespart�
 - **⚙ Einstellungen**
 - Fußzeile: **Version** und Link „Was ist neu?“
 - Alle **Überschriften** (z. B. Anzeige, Blocker, Extras, Verlauf, Ereignisse) lassen sich per Klick **auf- und zuklappen** (▾ / ▴); der Zustand wird gespeichert. Die Einstellungsgruppen starten zugeklappt.
+- **Höhe:** Beim Aufklappen ist das Panel automatisch **halb so hoch wie das Fenster** und hat eine Scroll-Leiste. Mit dem **Griff** (kleiner Strich am Rand) lässt sich die Höhe frei ziehen – sitzt die Box unten am Fensterrand, ist der Griff oben (nach oben ziehen = größer). Doppelklick auf den Griff = wieder halbe Höhe. Nie höher als das Fenster.
 
 ### 🛠 Dev-Modus
 

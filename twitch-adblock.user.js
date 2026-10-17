@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Adblock (Stream + Banner)
 // @namespace    local.twitch-adblock
-// @version      2.0.4
+// @version      2.0.5
 // @description  Bypasses pre-/mid-roll ads in the Twitch stream (playlist swap) and hides ad banners. Ad counter with time saved, emergency mode, DE/EN.
 // @description:de Umgeht Pre-/Mid-Roll-Werbung im Twitch-Stream (Playlist-Austausch) und blendet Werbebanner aus. Werbe-Zähler mit gesparter Zeit, Notfall-Modus, DE/EN.
 // @license      MIT
@@ -460,7 +460,21 @@
       display: none; padding: 4px 10px 10px; color: #efeff1; font-weight: 400;
       border-top: 1px solid rgba(145, 70, 255, 0.3);
     }
-    #ttv-adblock-counter.expanded .ttv-ab-panel { display: block; max-height: calc(100vh - 48px); overflow-y: auto; overscroll-behavior: contain; }
+    #ttv-adblock-counter.expanded .ttv-ab-panel { display: block; max-height: calc(100vh - 60px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: rgba(145, 70, 255, 0.6) transparent; }
+    #ttv-adblock-counter .ttv-ab-panel::-webkit-scrollbar { width: 8px; }
+    #ttv-adblock-counter .ttv-ab-panel::-webkit-scrollbar-thumb { background: rgba(145, 70, 255, 0.6); border-radius: 4px; }
+    #ttv-adblock-counter.expanded { display: flex; flex-direction: column; }
+    #ttv-adblock-counter .ttv-ab-grip {
+      display: none; height: 10px; flex: none; cursor: ns-resize; touch-action: none;
+      border-top: 1px solid rgba(145, 70, 255, 0.3); border-radius: 0 0 10px 10px;
+    }
+    /* Box sitzt unten am Fensterrand: Griff oben, Ziehen nach oben = größer */
+    #ttv-adblock-counter.grip-top .ttv-ab-grip {
+      order: -1; border-top: 0; border-bottom: 1px solid rgba(145, 70, 255, 0.3); border-radius: 10px 10px 0 0;
+    }
+    #ttv-adblock-counter.expanded .ttv-ab-grip { display: flex; align-items: center; justify-content: center; }
+    #ttv-adblock-counter .ttv-ab-grip::after { content: ''; width: 36px; height: 3px; border-radius: 2px; background: rgba(191, 148, 255, 0.5); }
+    #ttv-adblock-counter .ttv-ab-grip:hover::after, #ttv-adblock-counter.resizing .ttv-ab-grip::after { background: #bf94ff; }
     #ttv-adblock-counter .ttv-ab-stats {
       display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; margin: 6px 0;
     }
@@ -596,7 +610,7 @@
   // Zähler-Box mit Panel, Melde-Funktion, Statistik und Einstellungen
   // (alles im localStorage von twitch.tv gespeichert)
   // ---------------------------------------------------------------------------
-  const VERSION = '2.0.4';
+  const VERSION = '2.0.5';
   const REPO_URL = 'https://github.com/r79jv66tjh-byte/twitch-adblock';
   const RAW_URL = 'https://raw.githubusercontent.com/r79jv66tjh-byte/twitch-adblock/main/twitch-adblock.user.js';
   const ISSUE_URL = REPO_URL + '/issues/new?template=bug_report.yml';
@@ -615,8 +629,8 @@
 
   // Kurzinfo „Was ist neu“ zur aktuellen Version
   const WHATS_NEW = {
-    de: 'Alle Überschriften im Panel (Anzeige, Blocker, Extras, Verlauf, Ereignisse …) lassen sich auf- und zuklappen',
-    en: 'all headings in the panel (display, blocker, extras, history, events …) can be expanded and collapsed',
+    de: 'Panel öffnet sich auf halber Fensterhöhe mit Scroll-Leiste, Höhe per Griff unten frei verstellbar',
+    en: 'panel opens at half the window height with a scrollbar, height freely adjustable with the grip at the bottom',
   };
 
   // Datum in Ortszeit (für „Heute“ und den Verlauf)
@@ -736,6 +750,7 @@
       expand: 'Details, Melden & Einstellungen',
       collapse: 'Einklappen',
       devTitle: '🛠 Dev-Modus aktiv – klicken zum Ausschalten',
+      gripTitle: 'Ziehen = Höhe ändern, Doppelklick = halbe Fensterhöhe',
       emergencyOnTitle: 'Notfall-Modus AN: Rutscht Werbung durch, wird sie stumm und unscharf geschaltet – klicken zum Ausschalten',
       emergencyOffTitle: 'Notfall-Modus AUS – klicken zum Einschalten',
       emergencyOnNotice: 'Notfall-Modus AN: durchgerutschte Werbung wird stumm & unscharf geschaltet',
@@ -905,6 +920,7 @@
       expand: 'Details, reporting & settings',
       collapse: 'Collapse',
       devTitle: '🛠 Dev mode active – click to turn off',
+      gripTitle: 'Drag = change height, double-click = half the window height',
       emergencyOnTitle: 'Emergency mode ON: ads that slip through are muted and blurred – click to turn off',
       emergencyOffTitle: 'Emergency mode OFF – click to turn on',
       emergencyOnNotice: 'Emergency mode ON: ads that slip through are muted & blurred',
@@ -1062,6 +1078,8 @@
   let notice = null;
   let noticeTimer = null;
   let ui = {};
+  let panelHeight = 0;     // aktuelle Höhe des Panels (beim Aufklappen: halbe Fensterhöhe)
+  let wasExpanded = false;
 
   function el(tag, cls, text) {
     const e = document.createElement(tag);
@@ -1140,9 +1158,13 @@
     y = Math.max(0, Math.min(y, window.innerHeight - h));
     ui.root.style.left = x + 'px';
     ui.root.style.top = y + 'px';
+    // Sitzt die Box unten am Rand, kommt der Größen-Griff nach oben (nicht während des Ziehens umschalten)
+    if (!ui.root.classList.contains('resizing')) {
+      ui.root.classList.toggle('grip-top', y + h >= window.innerHeight - 24);
+    }
     placeNotice();
   }
-  window.addEventListener('resize', placeCounter);
+  window.addEventListener('resize', () => { applyPanelHeight(); placeCounter(); });
 
   function updateEmergency() {
     if (!ui.root) return;
@@ -1190,6 +1212,45 @@
     };
     ui.head.addEventListener('pointerup', end);
     ui.head.addEventListener('pointercancel', end);
+  }
+
+  // Panel-Höhe: höchstens Fensterhöhe minus Kopfzeile
+  function maxPanelHeight() {
+    const headH = ui.head ? ui.head.offsetHeight : 28;
+    return Math.max(80, window.innerHeight - headH - 24);
+  }
+  const halfPanelHeight = () => Math.max(80, Math.round(window.innerHeight / 2 - (ui.head ? ui.head.offsetHeight : 28)));
+
+  function applyPanelHeight() {
+    if (!ui.panel) return;
+    ui.panel.style.maxHeight = box.expanded ? Math.min(panelHeight || halfPanelHeight(), maxPanelHeight()) + 'px' : '';
+  }
+
+  function makeResizable() {
+    let start = null;
+    ui.grip.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      // Griff oben (Box sitzt unten): nach oben ziehen = größer
+      const dir = ui.root.classList.contains('grip-top') ? -1 : 1;
+      start = { y: e.clientY, h: ui.panel.getBoundingClientRect().height, dir };
+      ui.grip.setPointerCapture(e.pointerId);
+      ui.root.classList.add('resizing');
+      e.preventDefault();
+    });
+    ui.grip.addEventListener('pointermove', (e) => {
+      if (!start) return;
+      panelHeight = Math.round(Math.min(Math.max(start.h + start.dir * (e.clientY - start.y), 80), maxPanelHeight()));
+      applyPanelHeight();
+      placeCounter();
+    });
+    const end = () => { start = null; ui.root.classList.remove('resizing'); };
+    ui.grip.addEventListener('pointerup', end);
+    ui.grip.addEventListener('pointercancel', end);
+    ui.grip.addEventListener('dblclick', () => {
+      panelHeight = halfPanelHeight();
+      applyPanelHeight();
+      placeCounter();
+    });
   }
 
   // Bestätigung direkt im Button statt confirm()-Dialog (der kann vom Browser
@@ -1640,7 +1701,11 @@
 
     ui.panel.append(stats, ui.last, ui.issue, ui.reportRow, ui.statsBtn, ui.statsWrap, ui.devWrap,
       mainActions, ui.settingsBtn, ui.settingsWrap, ui.footer);
-    ui.root.append(ui.head, ui.panel);
+    // Griff unten: Höhe des Panels frei ziehen, Doppelklick = wieder halbe Fensterhöhe
+    ui.grip = el('div', 'ttv-ab-grip');
+    ui.grip.title = t('gripTitle');
+    makeResizable();
+    ui.root.append(ui.head, ui.panel, ui.grip);
     document.body.appendChild(ui.root);
 
     // Ereignisse
@@ -1728,6 +1793,10 @@
       : s.savedTotal > 0 ? t('headSaved')(s.total, fmtDur(s.savedTotal)) : t('head')(s.total);
     ui.head.title = t('version')(VERSION) + '\n' + (box.locked ? t('headLocked') : t('headDrag'));
     ui.root.classList.toggle('expanded', !!box.expanded);
+    // Beim Aufklappen automatisch auf die halbe Fensterhöhe stellen, danach frei verstellbar
+    if (box.expanded && !wasExpanded) panelHeight = halfPanelHeight();
+    wasExpanded = !!box.expanded;
+    applyPanelHeight();
     ui.root.classList.toggle('dev', !!settings.devMode);
     ui.toggle.textContent = box.expanded ? '▴' : '▾';
     ui.toggle.title = box.expanded ? t('collapse') : t('expand');

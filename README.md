@@ -73,6 +73,7 @@ In the bottom left the box shows e.g. **"🛡 42 ad breaks · 1 h 13 min saved"*
 - **⚙ Settings**
 - Footer: **version** and a "What's new?" link
 - All **headings** (e.g. Display, Blocker, Extras, History, Events) can be **expanded and collapsed** with a click (▾ / ▴); the state is saved. Settings groups start collapsed.
+- **Height:** when expanded, the panel automatically takes **half the window height** and scrolls. Drag the **grip** (small bar at the edge) to change the height freely – if the box sits at the bottom edge, the grip is at the top (drag up = bigger). Double-click the grip = back to half. Never taller than the window.
 
 ### 🛠 Dev mode
 
