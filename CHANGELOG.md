@@ -3,6 +3,11 @@
 🇬🇧 English / 🇩🇪 Deutsch – each entry is listed in both languages.
 Format: [Keep a Changelog](https://keepachangelog.com/), versions: [SemVer](https://semver.org/).
 
+## [2.1.3] - 2026-10-17
+
+- EN: Self-test checks all player types (embed, popout, autoplay) like the blocker and shows which one is ad-free
+- DE: Selbsttest prueft wie der Blocker alle Player-Typen (embed, popout, autoplay) und zeigt, welcher werbefrei ist
+
 ## [2.1.2] - 2026-10-17
 
 - EN: Self-test waits for all video workers and uses the best answer (fixes false 'stream list not recognised' with two workers)

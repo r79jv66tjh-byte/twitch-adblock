@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Adblock (Stream + Banner)
 // @namespace    local.twitch-adblock
-// @version      2.1.2
+// @version      2.1.3
 // @description  Bypasses pre-/mid-roll ads in the Twitch stream (playlist swap) and hides ad banners. Ad counter with time saved, emergency mode, DE/EN.
 // @description:de Umgeht Pre-/Mid-Roll-Werbung im Twitch-Stream (Playlist-Austausch) und blendet Werbebanner aus. Werbe-Zähler mit gesparter Zeit, Notfall-Modus, DE/EN.
 // @license      MIT
@@ -395,16 +395,23 @@
     async function selfTest() {
       const result = { type: 'selftest-result', usherPath, channel: lastChannel, streamsKnown: streams.size > 0 };
       if (lastChannel) {
-        const entry = await createBackup(lastChannel, cfg.playerTypes[0]);
-        result.backup = !!entry;
-        if (entry && entry.variants.length) {
-          result.backupQuality = quality(entry.variants[0].res);
-          result.backupVariants = entry.variants.length;
+        // wie der Blocker: Player-Typen der Reihe nach, bis einer werbefrei ist
+        for (const playerType of cfg.playerTypes) {
+          const entry = await createBackup(lastChannel, playerType);
+          if (!entry || !entry.variants.length) continue;
+          result.backup = true;
+          let ads = null;
           try {
             const r = await realFetch(entry.variants[0].url);
-            result.backupHasAds = r.ok ? hasAds(await r.text()) : null;
-          } catch (e) { result.backupHasAds = null; }
+            ads = r.ok ? hasAds(await r.text()) : null;
+          } catch (e) { ads = null; }
+          result.backupQuality = quality(entry.variants[0].res);
+          result.backupVariants = entry.variants.length;
+          result.backupHasAds = ads;
+          result.backupType = playerType;
+          if (ads === false) break;
         }
+        if (!result.backup) result.backup = false;
       }
       notify(result);
     }
@@ -672,7 +679,7 @@
   // Zähler-Box mit Panel, Melde-Funktion, Statistik und Einstellungen
   // (alles im localStorage von twitch.tv gespeichert)
   // ---------------------------------------------------------------------------
-  const VERSION = '2.1.2';
+  const VERSION = '2.1.3';
   const REPO_URL = 'https://github.com/r79jv66tjh-byte/twitch-adblock';
   const RAW_URL = 'https://raw.githubusercontent.com/r79jv66tjh-byte/twitch-adblock/main/twitch-adblock.user.js';
   const ISSUE_URL = REPO_URL + '/issues/new?template=bug_report.yml';
@@ -1609,7 +1616,7 @@
       add(res.streamsKnown, t('stStream'), res.usherPath || '');
       if (res.channel) {
         add(res.backup, t('stBackup'), res.backup && res.backupQuality ? t('stBackupDetail')(res.backupQuality, res.backupVariants) : '');
-        if (res.backup) add(res.backupHasAds === false, t('stBackupAds'), res.backupHasAds === null ? '?' : '');
+        if (res.backup) add(res.backupHasAds === false, t('stBackupAds'), res.backupHasAds === null ? '?' : (res.backupType || ''));
       }
     }
     const latest = await checkUpdate();
