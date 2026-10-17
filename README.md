@@ -64,6 +64,10 @@ In the bottom left the box shows e.g. **"🛡 42 ad breaks · 1 h 13 min saved"*
 
 **🛟 Emergency mode:** if an ad still slips through (Twitch shows its "Ad" label or countdown), the stream is **muted and heavily blurred** until the ad is over. Afterwards everything returns to how it was.
 
+**Replacement stream quality:** the notice shows the quality of the ad-free replacement stream, e.g. "… replacement stream active (720p)".
+
+**Fullscreen:** the box isn't visible in fullscreen, but notices then appear at the top centre of the player – including confirmations for Alt + W / Alt + Z.
+
 ### Panel (normal view)
 
 - **Statistics:** today, total, time saved today/total (green), slipped through (red)
@@ -81,6 +85,7 @@ For troubleshooting (Settings → Display → Dev mode). Additionally visible:
 
 - "This tab", last ad break with method, **last problem** (yellow = warning, red = error)
 - **⏱ Timestamp** (copies time, channel, method – saves nothing, **Alt + Z**) and **🔗 Sync** (links timestamp and slipped through)
+- **🩺 Self-test:** checks live with ✓/✗ whether a channel is open, the video plays, the video worker is connected, the stream list is recognised (incl. address form), Twitch provides a replacement stream (quality, currently ad-free?) and GitHub is reachable. The result is also logged – ideal to check whether Twitch changed something without waiting for an ad.
 - **Slipped-through log** and **event list** (last 15 entries)
 - **📋 Copy log**
 - **🧹 Clear events** (only the event log), **🗑 Clear slipped through** (list and "slipped through" counter), **↺ Reset counters** (all counters and history) – each asks for confirmation: 1st click "Sure? Click again", 2nd click within 4 s
@@ -97,11 +102,13 @@ Everything is saved immediately.
 | Show notices | Purple notices on/off | on |
 | Show numbers in the box | Off = only the 🛡 icon | on |
 | 🛠 Dev mode | Troubleshooting tools | off |
+| Fade the box when idle | Box becomes almost transparent after 4 s without the mouse (collapsed) | on |
 | Language | Automatic (browser), Deutsch, English | automatic |
 | **Blocker** | | |
 | Emergency mode | Mute & blur ads that slip through | on |
 | Log ads that slip through automatically | Logs ads that Twitch shows | on |
 | Repair frozen picture automatically | Picture frozen > 10 s: jump to live picture → restart player → reload page (max. every 5 min) | on |
+| Replacement stream only in full quality | If the replacement stream is worse than your stream, the ad is cut out instead; takes effect after reload | off |
 | Filter ads in recordings (VODs) | Experimental, takes effect after reload | off |
 | **Extras** | | |
 | Keyboard shortcuts | Alt + W = slipped through, Alt + Z = timestamp (not while typing in chat) | on |
@@ -110,6 +117,7 @@ Everything is saved immediately.
 | Hide Prime Gaming banners | Hides Prime Gaming prompts | off |
 | Stop the video on the front page | Stops the autoplaying video on twitch.tv | off |
 | **💾 Back up / 📂 Restore** | Counters, history, settings and log as a file, e.g. for a new PC | |
+| **📄 CSV export** | History per day and channels as a CSV file, e.g. for Excel | |
 
 Everything stays **only locally in your browser** (twitch.tv storage). Nothing is sent to Twitch or any server – except the daily update check on GitHub (only downloads the script file, sends no data).
 
@@ -144,6 +152,8 @@ The script automatically records what happens – no browser console (F12) neede
 
 Up to 200 events are stored; older ones are removed automatically.
 
+**Tip:** before reporting a problem, run **🩺 Self-test** in dev mode – the result is added to the log and helps with troubleshooting.
+
 **Stream shown as offline?** If the log says "OFFLINE (HTTP 404)", Twitch itself reports the channel as offline – that's not caused by the script. Its own errors are marked "Script error, stream continues without filter"; the stream then loads normally, just without the ad filter.
 
 ## Tips
@@ -159,7 +169,8 @@ Up to 200 events are stored; older ones are removed automatically.
 | `README.md` / `README.de.md` | Guide in English / German |
 | `CHANGELOG.md` | All changes per version |
 | `.github/ISSUE_TEMPLATE/` | Forms for bug reports and ideas |
-| `.github/workflows/check.yml` | Automatic check on every push |
+| `tests/worker.test.mjs` | Automatic tests (ads, replacement stream, offline, VOD, self-test) – locally: `node --test tests/worker.test.mjs` |
+| `.github/workflows/check.yml` | Automatic check on every push (syntax, tests, version numbers) |
 | `LICENSE` | MIT license |
 
 ## License

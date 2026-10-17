@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Adblock (Stream + Banner)
 // @namespace    local.twitch-adblock
-// @version      2.0.5
+// @version      2.1.0
 // @description  Bypasses pre-/mid-roll ads in the Twitch stream (playlist swap) and hides ad banners. Ad counter with time saved, emergency mode, DE/EN.
 // @description:de Umgeht Pre-/Mid-Roll-Werbung im Twitch-Stream (Playlist-Austausch) und blendet Werbebanner aus. Werbe-Zähler mit gesparter Zeit, Notfall-Modus, DE/EN.
 // @license      MIT
@@ -43,6 +43,8 @@
       hidePrime: false,  // Prime-Gaming-Banner ausblenden
       stopFrontpage: false, // automatisch startendes Video auf der Startseite stoppen
       vod: false,        // Werbung in Aufzeichnungen filtern (experimentell)
+      preferQuality: false, // Ersatz-Stream nur in voller Qualität, sonst herausschneiden
+      fadeIdle: true,    // Box im Leerlauf blass
     },
     channelName: 'ttv-adblock',
     // Damit mehrere offene Twitch-Tabs sich nicht gegenseitig mitzählen
@@ -152,6 +154,13 @@
       return variants;
     }
 
+    // „1280x720“ -> 720 bzw. „720p“
+    function height(res) {
+      const m = res && res.match(/\d+x(\d+)/);
+      return m ? parseInt(m[1], 10) : 0;
+    }
+    const quality = (res) => (height(res) ? height(res) + 'p' : '?');
+
     function pixels(res) {
       const m = res && res.match(/(\d+)x(\d+)/);
       return m ? parseInt(m[1], 10) * parseInt(m[2], 10) : 0;
@@ -256,6 +265,12 @@
         }
         const variant = pickVariant(entry.variants, info);
         if (!variant) continue;
+        const q = quality(variant.res);
+        // Option „nur volle Qualität“: schlechteren Ersatz-Stream nicht nehmen, lieber herausschneiden
+        if (cfg.preferQuality && info.res && height(variant.res) < height(info.res)) {
+          logOnce('backupLowQuality|' + playerType, 'info', 'backupLowQuality', { playerType, quality: q, wanted: quality(info.res) });
+          continue;
+        }
         try {
           const r = await realFetch(variant.url);
           if (!r.ok) { backupCache.delete(key); continue; }
@@ -265,8 +280,8 @@
             logOnce('backupHasAds|' + playerType, 'info', 'backupHasAds', { playerType });
             continue;
           }
-          logOnce('backupOk|' + playerType, 'info', 'backupOk', { playerType });
-          return text;
+          logOnce('backupOk|' + playerType, 'info', 'backupOk', { playerType, quality: q });
+          return { text, quality: q };
         } catch (e) {
           backupCache.delete(key);
         }
@@ -333,8 +348,11 @@
           if (info && !streams.has(url)) logOnce('mediaUnmatched', 'info', 'mediaUnmatched', { channel: info.channel });
           const replacement = info && info.channel ? await getBackupPlaylist(info) : null;
           if (replacement === null) logOnce('stripped', 'info', 'stripped', {});
-          text = replacement !== null ? replacement : stripAds(text);
-          notify({ type: 'ad', mode: replacement !== null ? 'backup' : 'stripped', channel: info ? info.channel : null });
+          text = replacement !== null ? replacement.text : stripAds(text);
+          notify({
+            type: 'ad', mode: replacement !== null ? 'backup' : 'stripped',
+            channel: info ? info.channel : null, quality: replacement ? replacement.quality : null,
+          });
         } else if (adActive) {
           adActive = false;
           backupCache.clear();
@@ -366,6 +384,30 @@
       }
     };
 
+    // Selbsttest auf Anfrage der Seite: Stream-Liste bekannt? Ersatz-Stream von Twitch erhältlich?
+    async function selfTest() {
+      const result = { type: 'selftest-result', usherPath, channel: lastChannel, streamsKnown: streams.size > 0 };
+      if (lastChannel) {
+        const entry = await createBackup(lastChannel, cfg.playerTypes[0]);
+        result.backup = !!entry;
+        if (entry && entry.variants.length) {
+          result.backupQuality = quality(entry.variants[0].res);
+          result.backupVariants = entry.variants.length;
+          try {
+            const r = await realFetch(entry.variants[0].url);
+            result.backupHasAds = r.ok ? hasAds(await r.text()) : null;
+          } catch (e) { result.backupHasAds = null; }
+        }
+      }
+      notify(result);
+    }
+    if (bc) {
+      bc.addEventListener('message', (e) => {
+        const msg = e.data || {};
+        if (msg.tabId === cfg.tabId && msg.type === 'selftest') selfTest().catch((err) => notify({ type: 'selftest-result', error: String(err && err.message) }));
+      });
+    }
+
     log('info', 'workerReady', {});
   }
 
@@ -396,8 +438,9 @@
       }
       // VOD-Filter ist eine Einstellung – gilt für neu gestartete Player
       let vod = false;
-      try { vod = !!settings.vod; } catch (e) { /* Einstellungen noch nicht geladen */ }
-      const cfg = Object.assign({}, CONFIG, { vod });
+      let preferQuality = false;
+      try { vod = !!settings.vod; preferQuality = !!settings.preferQuality; } catch (e) { /* Einstellungen noch nicht geladen */ }
+      const cfg = Object.assign({}, CONFIG, { vod, preferQuality });
       const code = '(' + workerMain.toString() + ')(' + JSON.stringify(cfg) + ');\n' + src;
       super(URL.createObjectURL(new Blob([code], { type: 'application/javascript' })), options);
       logEvent('info', 'workerPatched', {});
@@ -595,6 +638,18 @@
       pointer-events: none; transition: opacity .3s; opacity: 0;
     }
     #ttv-adblock-notice.show { opacity: 1; }
+    /* Vollbild: Hinweis oben mittig im Player */
+    #ttv-adblock-notice.fs {
+      position: fixed; left: 50% !important; top: 24px !important; transform: translateX(-50%);
+      z-index: 2147483647; font-size: 15px; max-width: 80vw; text-align: center;
+    }
+    #ttv-adblock-counter { transition: opacity .6s; }
+    #ttv-adblock-counter.idle:not(:hover):not(.expanded) { opacity: .25; }
+    #ttv-adblock-counter .ttv-ab-selftest { text-align: center; color: #efeff1; background: rgba(145, 70, 255, 0.25); }
+    #ttv-adblock-counter .ttv-ab-selftest[disabled] { opacity: .6; cursor: progress; }
+    #ttv-adblock-counter .ttv-ab-selftest-list { max-height: none; }
+    #ttv-adblock-counter .ttv-ab-selftest-list li.ok { color: #5fe0a5; }
+    #ttv-adblock-counter .ttv-ab-selftest-list li.fail { color: #ffb3b3; }
   `;
 
   function injectCss() {
@@ -610,7 +665,7 @@
   // Zähler-Box mit Panel, Melde-Funktion, Statistik und Einstellungen
   // (alles im localStorage von twitch.tv gespeichert)
   // ---------------------------------------------------------------------------
-  const VERSION = '2.0.5';
+  const VERSION = '2.1.0';
   const REPO_URL = 'https://github.com/r79jv66tjh-byte/twitch-adblock';
   const RAW_URL = 'https://raw.githubusercontent.com/r79jv66tjh-byte/twitch-adblock/main/twitch-adblock.user.js';
   const ISSUE_URL = REPO_URL + '/issues/new?template=bug_report.yml';
@@ -629,8 +684,8 @@
 
   // Kurzinfo „Was ist neu“ zur aktuellen Version
   const WHATS_NEW = {
-    de: 'Panel öffnet sich auf halber Fensterhöhe mit Scroll-Leiste, Höhe per Griff unten frei verstellbar',
-    en: 'panel opens at half the window height with a scrollbar, height freely adjustable with the grip at the bottom',
+    de: '🩺 Selbsttest (Dev-Modus), Hinweise auch im Vollbild, Qualität des Ersatz-Streams, Box im Leerlauf blass, CSV-Export',
+    en: '🩺 self-test (dev mode), notices in fullscreen, replacement stream quality, box fades when idle, CSV export',
   };
 
   // Datum in Ortszeit (für „Heute“ und den Verlauf)
@@ -751,6 +806,35 @@
       collapse: 'Einklappen',
       devTitle: '🛠 Dev-Modus aktiv – klicken zum Ausschalten',
       gripTitle: 'Ziehen = Höhe ändern, Doppelklick = halbe Fensterhöhe',
+      noticeBackupQ: (q) => 'Werbung erkannt – werbefreier Ersatz-Stream aktiv (' + q + ')',
+      selftestBtn: '🩺 Selbsttest',
+      selftestTitle: 'Prüft live: Player, Video-Worker, Stream-Liste, Ersatz-Stream von Twitch, Update-Server',
+      selftestRunning: '🩺 Läuft …',
+      selftestTitleList: 'Selbsttest',
+      stChannel: 'Kanal geöffnet',
+      stNoChannel: 'kein Kanal',
+      stPlayer: 'Video läuft',
+      stPaused: 'pausiert',
+      stRunning: 'läuft',
+      stWorker: 'Video-Worker verbunden',
+      stWorkerAnswer: 'Video-Worker antwortet',
+      stTimeout: 'keine Antwort (Seite neu laden?)',
+      stStream: 'Stream-Liste erkannt',
+      stBackup: 'Ersatz-Stream von Twitch erhältlich',
+      stBackupDetail: (q, n) => 'bis ' + q + ', ' + n + ' Qualitäten',
+      stBackupAds: 'Ersatz-Stream gerade werbefrei',
+      stUpdate: 'GitHub erreichbar (Updates)',
+      stLatest: (v) => 'neueste Version: ' + v,
+      selftestDone: (ok, total) => 'Selbsttest: ' + ok + ' von ' + total + ' in Ordnung',
+      setPreferQuality: 'Ersatz-Stream nur in voller Qualität',
+      setPreferQualityHint: 'Sonst Werbung lieber herausschneiden – wirkt nach dem Neuladen der Seite',
+      setFadeIdle: 'Box im Leerlauf blass',
+      setFadeIdleHint: 'Wird nach ein paar Sekunden ohne Maus fast durchsichtig',
+      csvBtn: '📄 CSV-Export',
+      csvTitle: 'Verlauf pro Tag und Kanäle als CSV-Datei (z. B. für Excel)',
+      csvHead: 'Typ;Name;Werbepausen;Gespart (Sekunden);Durchgerutscht',
+      csvDay: 'Tag',
+      csvChannel: 'Kanal',
       emergencyOnTitle: 'Notfall-Modus AN: Rutscht Werbung durch, wird sie stumm und unscharf geschaltet – klicken zum Ausschalten',
       emergencyOffTitle: 'Notfall-Modus AUS – klicken zum Einschalten',
       emergencyOnNotice: 'Notfall-Modus AN: durchgerutschte Werbung wird stumm & unscharf geschaltet',
@@ -846,7 +930,9 @@
         backupUsherFail: (d) => 'Ersatz-Stream (' + d.playerType + '): Stream-Liste fehlgeschlagen (HTTP ' + d.status + ')',
         backupError: (d) => 'Ersatz-Stream (' + d.playerType + '): Fehler – ' + d.message,
         backupHasAds: (d) => 'Ersatz-Stream (' + d.playerType + ') hat ebenfalls Werbung',
-        backupOk: (d) => 'Werbefreier Ersatz-Stream aktiv (' + d.playerType + ')',
+        backupOk: (d) => 'Werbefreier Ersatz-Stream aktiv (' + d.playerType + (d.quality ? ', ' + d.quality : '') + ')',
+        backupLowQuality: (d) => 'Ersatz-Stream (' + d.playerType + ') nur ' + d.quality + ' statt ' + d.wanted + ' – übersprungen (Einstellung „nur volle Qualität“)',
+        selftest: (d) => 'Selbsttest: ' + d.ok + ' von ' + d.total + ' in Ordnung' + (d.failed ? ' – Probleme: ' + d.failed : ''),
         stripped: () => 'Kein werbefreier Ersatz-Stream – Werbung wird herausgeschnitten',
         vodAd: () => 'Werbung in Aufzeichnung (VOD) herausgeschnitten',
         playlistSeen: (d) => 'Player nutzt ' + (d.kind === 'master' ? 'Stream-Liste' : 'Playlist') + ': ' + d.url,
@@ -921,6 +1007,35 @@
       collapse: 'Collapse',
       devTitle: '🛠 Dev mode active – click to turn off',
       gripTitle: 'Drag = change height, double-click = half the window height',
+      noticeBackupQ: (q) => 'Ad detected – ad-free replacement stream active (' + q + ')',
+      selftestBtn: '🩺 Self-test',
+      selftestTitle: 'Checks live: player, video worker, stream list, replacement stream from Twitch, update server',
+      selftestRunning: '🩺 Running …',
+      selftestTitleList: 'Self-test',
+      stChannel: 'Channel open',
+      stNoChannel: 'no channel',
+      stPlayer: 'Video playing',
+      stPaused: 'paused',
+      stRunning: 'playing',
+      stWorker: 'Video worker connected',
+      stWorkerAnswer: 'Video worker responds',
+      stTimeout: 'no answer (reload the page?)',
+      stStream: 'Stream list recognised',
+      stBackup: 'Replacement stream available from Twitch',
+      stBackupDetail: (q, n) => 'up to ' + q + ', ' + n + ' qualities',
+      stBackupAds: 'Replacement stream currently ad-free',
+      stUpdate: 'GitHub reachable (updates)',
+      stLatest: (v) => 'latest version: ' + v,
+      selftestDone: (ok, total) => 'Self-test: ' + ok + ' of ' + total + ' OK',
+      setPreferQuality: 'Replacement stream only in full quality',
+      setPreferQualityHint: 'Otherwise rather cut the ad out – takes effect after reloading the page',
+      setFadeIdle: 'Fade the box when idle',
+      setFadeIdleHint: 'Becomes almost transparent after a few seconds without the mouse',
+      csvBtn: '📄 CSV export',
+      csvTitle: 'History per day and channels as a CSV file (e.g. for Excel)',
+      csvHead: 'Type;Name;Ad breaks;Saved (seconds);Slipped through',
+      csvDay: 'Day',
+      csvChannel: 'Channel',
       emergencyOnTitle: 'Emergency mode ON: ads that slip through are muted and blurred – click to turn off',
       emergencyOffTitle: 'Emergency mode OFF – click to turn on',
       emergencyOnNotice: 'Emergency mode ON: ads that slip through are muted & blurred',
@@ -1016,7 +1131,9 @@
         backupUsherFail: (d) => 'Replacement stream (' + d.playerType + '): stream list failed (HTTP ' + d.status + ')',
         backupError: (d) => 'Replacement stream (' + d.playerType + '): error – ' + d.message,
         backupHasAds: (d) => 'Replacement stream (' + d.playerType + ') has ads as well',
-        backupOk: (d) => 'Ad-free replacement stream active (' + d.playerType + ')',
+        backupOk: (d) => 'Ad-free replacement stream active (' + d.playerType + (d.quality ? ', ' + d.quality : '') + ')',
+        backupLowQuality: (d) => 'Replacement stream (' + d.playerType + ') only ' + d.quality + ' instead of ' + d.wanted + ' – skipped (setting "only full quality")',
+        selftest: (d) => 'Self-test: ' + d.ok + ' of ' + d.total + ' OK' + (d.failed ? ' – problems: ' + d.failed : ''),
         stripped: () => 'No ad-free replacement stream – ads are being cut out',
         vodAd: () => 'Ad in recording (VOD) cut out',
         playlistSeen: (d) => 'Player uses ' + (d.kind === 'master' ? 'stream list' : 'playlist') + ': ' + d.url,
@@ -1351,13 +1468,13 @@
   async function doStamp() {
     const ok = await copyText(reportStamp());
     flashButton(ui.stamp, ok ? t('copied') : t('failed'));
-    if (!ui.root || !box.expanded || !settings.devMode) showNotice(ok ? reportStamp() : t('failed'), 4000);
+    if (!ui.root || !box.expanded || !settings.devMode || document.fullscreenElement) showNotice(ok ? reportStamp() : t('failed'), 4000);
   }
   // Durchgerutscht: im Protokoll speichern und Zähler +1
   function doLeak() {
     addReport(false);
     flashButton(ui.leak, t('saved'));
-    if (!ui.root || !box.expanded) showNotice(t('leak') + ' – ' + t('saved'), 3000);
+    if (!ui.root || !box.expanded || document.fullscreenElement) showNotice(t('leak') + ' – ' + t('saved'), 3000);
   }
   // Ist Sync an, löst jeder der beiden Buttons auch den anderen aus
   const pressStamp = () => { doStamp(); if (box.sync) doLeak(); };
@@ -1415,6 +1532,87 @@
     document.body.appendChild(a);
     a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  }
+
+  // Verlauf pro Tag und Kanäle als CSV (Semikolon + BOM, damit Excel Umlaute und Spalten erkennt)
+  function exportCsv() {
+    const s = loadStats();
+    const cell = (v) => '"' + String(v).replace(/"/g, '""') + '"';
+    const rows = [t('csvHead')];
+    for (const d of Object.keys(s.days).sort()) {
+      const v = s.days[d];
+      rows.push([t('csvDay'), d, v.ads || 0, Math.round(v.saved || 0), ''].map(cell).join(';'));
+    }
+    for (const [name, c] of Object.entries(s.channels).sort((a, b) => (b[1].ads || 0) - (a[1].ads || 0))) {
+      rows.push([t('csvChannel'), name, c.ads || 0, Math.round(c.saved || 0), c.leaked || 0].map(cell).join(';'));
+    }
+    const a = el('a');
+    a.href = URL.createObjectURL(new Blob(['﻿' + rows.join('\r\n')], { type: 'text/csv;charset=utf-8' }));
+    a.download = 'twitch-adblock-statistik-' + today() + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Selbsttest: prüft live, ob alle Teile funktionieren
+  // ---------------------------------------------------------------------------
+  let lastSelfTest = null;
+  let selfTestResolve = null;
+  let mainBc = null; // BroadcastChannel zur Kommunikation mit dem Video-Worker
+
+  async function runSelfTest() {
+    const results = [];
+    const add = (ok, label, detail) => results.push({ ok: !!ok, label, detail: detail || '' });
+    const v = mainVideo();
+    add(!!currentChannel(), t('stChannel'), currentChannel() || t('stNoChannel'));
+    add(!!v && !v.paused, t('stPlayer'), v ? (v.paused ? t('stPaused') : t('stRunning')) : '–');
+    add(workerSeen, t('stWorker'));
+
+    // Worker fragen: kennt er die Stream-Liste, bekommt er einen Ersatz-Stream von Twitch?
+    const res = await new Promise((resolve) => {
+      selfTestResolve = resolve;
+      try { if (mainBc) mainBc.postMessage({ tabId: CONFIG.tabId, type: 'selftest' }); } catch (e) { resolve(null); }
+      setTimeout(() => resolve(null), 10000);
+    });
+    selfTestResolve = null;
+    if (!res) {
+      add(false, t('stWorkerAnswer'), t('stTimeout'));
+    } else {
+      add(res.streamsKnown, t('stStream'), res.usherPath || '');
+      if (res.channel) {
+        add(res.backup, t('stBackup'), res.backup && res.backupQuality ? t('stBackupDetail')(res.backupQuality, res.backupVariants) : '');
+        if (res.backup) add(res.backupHasAds === false, t('stBackupAds'), res.backupHasAds === null ? '?' : '');
+      }
+    }
+    const latest = await checkUpdate();
+    add(latest !== null, t('stUpdate'), latest ? t('stLatest')(latest) : '');
+
+    const ok = results.filter((r) => r.ok).length;
+    const failed = results.filter((r) => !r.ok).map((r) => r.label).join(', ');
+    logEvent(failed ? 'warn' : 'info', 'selftest', { ok, total: results.length, failed });
+    showNotice(t('selftestDone')(ok, results.length), 5000);
+    lastSelfTest = results;
+    return results;
+  }
+
+  function renderSelfTest(results) {
+    if (!ui.selftestList) return;
+    ui.selftestList.replaceChildren();
+    for (const r of results) {
+      const li = el('li', r.ok ? 'ok' : 'fail', (r.ok ? '✓ ' : '✗ ') + r.label + (r.detail ? ' – ' + r.detail : ''));
+      ui.selftestList.append(li);
+    }
+    placeCounter();
+  }
+
+  // Box im Leerlauf blass: nach 4 s ohne Maus (nur zugeklappt)
+  let idleTimer = null;
+  function scheduleIdle() {
+    clearTimeout(idleTimer);
+    if (!ui.root) return;
+    ui.root.classList.remove('idle');
+    if (settings.fadeIdle) idleTimer = setTimeout(() => { if (ui.root) ui.root.classList.add('idle'); }, 4000);
   }
 
   function importData(file, btn) {
@@ -1512,6 +1710,7 @@
     check('showNotice', t('setNotice'));
     check('showCounter', t('setCounter'), t('setCounterHint'));
     check('devMode', t('setDev'), t('setDevHint'));
+    check('fadeIdle', t('setFadeIdle'), t('setFadeIdleHint'));
     const langRow = el('label', 'ttv-ab-setting ttv-ab-lang');
     const select = el('select');
     for (const [val, label] of [['auto', t('langAuto')], ['de', 'Deutsch'], ['en', 'English']]) {
@@ -1532,6 +1731,7 @@
     check('emergency', t('setEmergency'));
     check('autoDetect', t('setAuto'));
     check('autoRecover', t('setRecover'), t('setRecoverHint'));
+    check('preferQuality', t('setPreferQuality'), t('setPreferQualityHint'));
     check('vod', t('setVod'), t('setVodHint'));
 
     group('setExtra', t('groupExtra'));
@@ -1555,7 +1755,10 @@
     file.style.display = 'none';
     file.addEventListener('change', () => { if (file.files[0]) importData(file.files[0], ui.importBtn); file.value = ''; });
     ui.importBtn.addEventListener('click', () => file.click());
-    backup.append(exportBtn, ui.importBtn, file);
+    const csvBtn = el('button', '', t('csvBtn'));
+    csvBtn.title = t('csvTitle');
+    csvBtn.addEventListener('click', exportCsv);
+    backup.append(exportBtn, ui.importBtn, csvBtn, file);
     current.append(backup);
 
     ui.settingsBtn.addEventListener('click', () => {
@@ -1679,7 +1882,22 @@
     ui.clearEvents.title = t('clearEventsTitle');
     ui.reset = el('button', '', t('resetAll'));
     devActions.append(ui.copy, ui.clearEvents, ui.clear, ui.reset);
-    ui.devWrap.append(leaks.head, leaks.body, events.head, events.body, devActions);
+    // Selbsttest
+    const st = foldSection('selftest', t('selftestTitleList'), true);
+    ui.selftestBtn = el('button', 'ttv-ab-wide ttv-ab-selftest', t('selftestBtn'));
+    ui.selftestBtn.title = t('selftestTitle');
+    ui.selftestList = el('ul', 'ttv-ab-selftest-list');
+    st.body.append(ui.selftestBtn, ui.selftestList);
+    ui.selftestBtn.addEventListener('click', async () => {
+      if (ui.selftestBtn.disabled) return;
+      ui.selftestBtn.disabled = true;
+      ui.selftestBtn.textContent = t('selftestRunning');
+      renderSelfTest(await runSelfTest());
+      ui.selftestBtn.disabled = false;
+      ui.selftestBtn.textContent = t('selftestBtn');
+    });
+    if (lastSelfTest) renderSelfTest(lastSelfTest);
+    ui.devWrap.append(st.head, st.body, leaks.head, leaks.body, events.head, events.body, devActions);
 
     // Immer sichtbar: Fehler melden, Updates
     const mainActions = el('div', 'ttv-ab-actions');
@@ -1769,6 +1987,10 @@
       flashButton(ui.reset, t('resetDone'));
     });
 
+    ui.root.addEventListener('mouseenter', () => { clearTimeout(idleTimer); ui.root.classList.remove('idle'); });
+    ui.root.addEventListener('mouseleave', scheduleIdle);
+    scheduleIdle();
+
     updateSync();
     updateLock();
     updateEmergency();
@@ -1798,6 +2020,7 @@
     wasExpanded = !!box.expanded;
     applyPanelHeight();
     ui.root.classList.toggle('dev', !!settings.devMode);
+    if (!settings.fadeIdle) ui.root.classList.remove('idle');
     ui.toggle.textContent = box.expanded ? '▴' : '▾';
     ui.toggle.title = box.expanded ? t('collapse') : t('expand');
     ui.update.hidden = !upd;
@@ -2073,6 +2296,7 @@
   // ---------------------------------------------------------------------------
   function placeNotice() {
     if (!notice) return;
+    if (document.fullscreenElement) return; // im Vollbild oben mittig per CSS
     if (!ui.root) {
       notice.style.left = '12px';
       notice.style.top = (window.innerHeight - notice.offsetHeight - 12) + 'px';
@@ -2086,6 +2310,15 @@
     notice.style.top = top + 'px';
   }
 
+  // Im Vollbild zeigt der Browser nur den Player – der Hinweis muss dann dort hinein
+  function attachNotice() {
+    if (!notice) return;
+    const host = document.fullscreenElement || document.body;
+    if (notice.parentNode !== host) host.appendChild(notice);
+    notice.classList.toggle('fs', !!document.fullscreenElement);
+  }
+  document.addEventListener('fullscreenchange', () => { attachNotice(); placeNotice(); });
+
   function showNotice(text, autoHideMs, force) {
     if ((!settings.showNotice && !force) || !document.body) return;
     if (!notice) {
@@ -2095,6 +2328,7 @@
     }
     clearTimeout(noticeTimer);
     if (text) {
+      attachNotice();
       notice.textContent = text;
       notice.classList.add('show');
       placeNotice();
@@ -2109,10 +2343,13 @@
   // ---------------------------------------------------------------------------
   if (typeof BroadcastChannel !== 'undefined') {
     const bc = new BroadcastChannel(CONFIG.channelName);
+    mainBc = bc;
     bc.onmessage = (e) => {
       const msg = e.data || {};
       if (msg.tabId !== CONFIG.tabId) return; // Meldung aus einem anderen Tab
-      if (msg.type === 'log') {
+      if (msg.type === 'selftest-result') {
+        if (selfTestResolve) selfTestResolve(msg);
+      } else if (msg.type === 'log') {
         const { type, tabId, level, code, ...data } = msg;
         if (code === 'workerReady') workerSeen = true;
         logEvent(level, code, data);
@@ -2125,7 +2362,9 @@
         lastAd = lastAd || { time: Date.now() };
         lastAd.mode = msg.mode;
         if (msg.channel) lastAd.channel = msg.channel;
-        showNotice(msg.mode === 'backup' ? t('noticeBackup') : t('noticeStripped'));
+        showNotice(msg.mode === 'backup'
+          ? (msg.quality && msg.quality !== '?' ? t('noticeBackupQ')(msg.quality) : t('noticeBackup'))
+          : t('noticeStripped'));
         if (box.expanded) renderCounter();
       } else if (msg.type === 'ad-end') {
         lastAdMsg = 0;

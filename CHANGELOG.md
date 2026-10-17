@@ -3,6 +3,24 @@
 🇬🇧 English / 🇩🇪 Deutsch – each entry is listed in both languages.
 Format: [Keep a Changelog](https://keepachangelog.com/), versions: [SemVer](https://semver.org/).
 
+## [2.1.0] – 2026-10-17
+
+**EN**
+- **🩺 Self-test** (dev mode): checks live whether the channel is open, the video plays, the video worker is connected, the stream list is recognised (incl. address form), Twitch provides a replacement stream (quality, ad-free) and GitHub is reachable – result as ✓/✗ list and in the log
+- **Fullscreen**: notices are shown inside the player (top centre), incl. confirmations for Alt+W / Alt+Z
+- **Replacement stream quality** shown in notice and log (e.g. "720p"); new option "Replacement stream only in full quality" (otherwise cut the ad out)
+- **Box fades when idle** (option, on by default)
+- **CSV export** of history per day and channels (for Excel)
+- **Automatic tests** in the repo (`tests/worker.test.mjs`, 7 scenarios) – run on every push via GitHub Actions
+
+**DE**
+- **🩺 Selbsttest** (Dev-Modus): prüft live, ob ein Kanal geöffnet ist, das Video läuft, der Video-Worker verbunden ist, die Stream-Liste erkannt wird (inkl. Adressform), Twitch einen Ersatz-Stream liefert (Qualität, werbefrei) und GitHub erreichbar ist – Ergebnis als ✓/✗-Liste und im Protokoll
+- **Vollbild**: Hinweise erscheinen im Player (oben mittig), auch Bestätigungen für Alt+W / Alt+Z
+- **Qualität des Ersatz-Streams** in Hinweis und Protokoll (z. B. „720p“); neue Option „Ersatz-Stream nur in voller Qualität“ (sonst Werbung herausschneiden)
+- **Box im Leerlauf blass** (Option, standardmäßig an)
+- **CSV-Export** des Verlaufs pro Tag und der Kanäle (für Excel)
+- **Automatische Tests** im Repo (`tests/worker.test.mjs`, 7 Szenarien) – laufen bei jedem Push über GitHub Actions
+
 ## [2.0.5] – 2026-10-17
 
 - EN: The expanded panel automatically opens at half the window height and scrolls; the grip at the bottom changes the height freely (double-click = back to half); never taller than the window

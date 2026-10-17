@@ -17,6 +17,9 @@ jobs:
       - name: Syntax
         run: node --check twitch-adblock.user.js
 
+      - name: Tests (Werbung, Ersatz-Stream, Offline, VOD, Selbsttest)
+        run: node --test tests/worker.test.mjs
+
       - name: Version consistency (@version, VERSION, CHANGELOG)
         run: |
           HEADER=$(grep -oP '^// @version\s+\K[\d.]+' twitch-adblock.user.js)

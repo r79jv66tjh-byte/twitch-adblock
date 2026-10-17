@@ -64,6 +64,10 @@ Unten links zeigt die Box z. B. **„🛡 42 Werbepausen · 1 h 13 min gespart�
 
 **🛟 Notfall-Modus:** Rutscht trotzdem Werbung durch (Twitch zeigt sein „Werbung“-Label oder den Countdown), wird der Stream **stummgeschaltet und stark unscharf**, bis die Werbung vorbei ist. Danach ist alles wieder wie vorher.
 
+**Ersatz-Stream-Qualität:** Der Hinweis zeigt, in welcher Qualität der werbefreie Ersatz-Stream läuft, z. B. „… Ersatz-Stream aktiv (720p)“.
+
+**Vollbild:** Im Vollbild ist die Box nicht sichtbar, die Hinweise erscheinen dann aber oben mittig im Player – auch die Bestätigungen für Alt + W / Alt + Z.
+
 ### Panel (normale Ansicht)
 
 - **Statistik:** Heute, Insgesamt, Zeit gespart heute/insgesamt (grün), Durchgerutscht (rot)
@@ -81,6 +85,7 @@ Für die Fehlersuche (Einstellungen → Anzeige → Dev-Modus). Zusätzlich sich
 
 - „Dieser Tab“, letzte Werbepause mit Methode, **letztes Problem** (gelb = Warnung, rot = Fehler)
 - **⏱ Zeitstempel** (kopiert Uhrzeit, Kanal, Methode – speichert nichts, **Alt + Z**) und **🔗 Sync** (koppelt Zeitstempel und Durchgerutscht)
+- **🩺 Selbsttest:** prüft live mit ✓/✗, ob ein Kanal geöffnet ist, das Video läuft, der Video-Worker verbunden ist, die Stream-Liste erkannt wird (inkl. Adressform), Twitch einen Ersatz-Stream liefert (Qualität, gerade werbefrei?) und GitHub erreichbar ist. Das Ergebnis steht auch im Protokoll – ideal, um zu prüfen, ob Twitch etwas geändert hat, ohne auf Werbung warten zu müssen.
 - **Durchgerutscht-Protokoll** und **Ereignisliste** (die letzten 15 Einträge)
 - **📋 Protokoll kopieren**
 - **🧹 Ereignisse leeren** (nur das Ereignis-Protokoll), **🗑 Durchgerutscht leeren** (Liste und Zähler „Durchgerutscht“), **↺ Zähler zurücksetzen** (alle Zähler und der Verlauf) – Löschen fragt jeweils nach: 1. Klick „Sicher? Nochmal klicken“, 2. Klick innerhalb von 4 s
@@ -97,11 +102,13 @@ Alles wird sofort gespeichert.
 | Hinweise einblenden | Lila Hinweise an/aus | an |
 | Zahlen in der Box anzeigen | Aus = nur das 🛡-Symbol | an |
 | 🛠 Dev-Modus | Werkzeuge zur Fehlersuche | aus |
+| Box im Leerlauf blass | Box wird nach 4 s ohne Maus fast durchsichtig (zugeklappt) | an |
 | Sprache | Automatisch (Browser), Deutsch, English | automatisch |
 | **Blocker** | | |
 | Notfall-Modus | Durchgerutschte Werbung stumm & unscharf | an |
 | Durchgerutschte Werbung automatisch protokollieren | Protokolliert Werbung, die Twitch anzeigt | an |
 | Hängendes Bild automatisch reparieren | Hängt das Bild > 10 s: zum Live-Bild springen → Player neu starten → Seite neu laden (max. alle 5 min) | an |
+| Ersatz-Stream nur in voller Qualität | Ist der Ersatz-Stream schlechter als dein Stream, wird die Werbung lieber herausgeschnitten; wirkt nach Neuladen | aus |
 | Werbung in Aufzeichnungen (VODs) filtern | Experimentell, wirkt nach Neuladen | aus |
 | **Extras** | | |
 | Tastenkürzel | Alt + W = Durchgerutscht, Alt + Z = Zeitstempel (nicht beim Tippen im Chat) | an |
@@ -110,6 +117,7 @@ Alles wird sofort gespeichert.
 | Prime-Gaming-Banner ausblenden | Blendet Prime-Gaming-Hinweise aus | aus |
 | Video auf der Startseite stoppen | Stoppt das automatisch startende Video auf twitch.tv | aus |
 | **💾 Sichern / 📂 Wiederherstellen** | Zähler, Verlauf, Einstellungen und Protokoll als Datei, z. B. für einen neuen PC | |
+| **📄 CSV-Export** | Verlauf pro Tag und Kanäle als CSV-Datei, z. B. für Excel | |
 
 Alles bleibt **nur lokal in deinem Browser** (Speicher von twitch.tv). Es wird nichts an Twitch oder irgendeinen Server geschickt – außer der täglichen Update-Abfrage bei GitHub (lädt nur die Script-Datei, sendet keine Daten).
 
@@ -144,6 +152,8 @@ Das Script schreibt automatisch mit, was passiert – die Browser-Konsole (F12) 
 
 Gespeichert werden bis zu 200 Ereignisse, ältere fallen automatisch weg.
 
+**Tipp:** Vor einer Fehlermeldung im Dev-Modus kurz **🩺 Selbsttest** ausführen – das Ergebnis landet im Protokoll und hilft bei der Fehlersuche.
+
 **Stream wird als offline angezeigt?** Steht im Protokoll „OFFLINE (HTTP 404)“, meldet Twitch selbst den Kanal als offline – das liegt nicht am Script. Eigene Fehler kennzeichnet das Script mit „Fehler im Script, Stream lädt ohne Filter weiter“; der Stream lädt dann normal, nur ohne Werbefilter.
 
 ## Tipps
@@ -159,7 +169,8 @@ Gespeichert werden bis zu 200 Ereignisse, ältere fallen automatisch weg.
 | `README.md` / `README.de.md` | Anleitung Englisch / Deutsch |
 | `CHANGELOG.md` | Alle Änderungen pro Version |
 | `.github/ISSUE_TEMPLATE/` | Formulare für Fehlermeldungen und Ideen |
-| `.github/workflows/check.yml` | Automatische Prüfung bei jedem Push |
+| `tests/worker.test.mjs` | Automatische Tests (Werbung, Ersatz-Stream, Offline, VOD, Selbsttest) – lokal: `node --test tests/worker.test.mjs` |
+| `.github/workflows/check.yml` | Automatische Prüfung bei jedem Push (Syntax, Tests, Versionsnummern) |
 | `LICENSE` | MIT-Lizenz |
 
 ## Lizenz
