@@ -2,7 +2,7 @@
 
 🇬🇧 **English** | [🇩🇪 Deutsch](README.de.md)
 
-*This project is AI-assisted (vibecoded).*
+*This project is AI-generated (vibecoded) – directed, tested and maintained by a human.*
 
 Blocks or bypasses on twitch.tv:
 

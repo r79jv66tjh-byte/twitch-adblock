@@ -6,7 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/), versions: [SemVer](http
 ## [Unreleased]
 
 - **Install page** (`docs/index.html`, GitHub Pages): guided installation in 3 steps with browser detection, DE/EN.
-- README notice: the project is AI-assisted (vibecoded).
+- README notice: the project is AI-generated (vibecoded), directed, tested and maintained by a human.
 - Changelog and code comments are now in English only (README, quick guide and UI stay bilingual).
 
 ## [2.2.0] - 2026-10-17

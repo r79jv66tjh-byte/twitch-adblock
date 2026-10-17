@@ -2,7 +2,7 @@
 
 [🇬🇧 English](README.md) | 🇩🇪 **Deutsch**
 
-*Dieses Projekt ist KI-gestützt entwickelt (vibecoded).*
+*Dieses Projekt ist KI-generiert (vibecoded) – gesteuert, getestet und gepflegt von einem Menschen.*
 
 Blockiert bzw. umgeht auf twitch.tv:
 
