@@ -3,6 +3,11 @@
 🇬🇧 English / 🇩🇪 Deutsch – each entry is listed in both languages.
 Format: [Keep a Changelog](https://keepachangelog.com/), versions: [SemVer](https://semver.org/).
 
+## [2.0.1] – 2026-10-17
+
+- EN: Emergency mode now also hides Twitch's ad buttons ("Ad ⓘ", "Learn more"), which Twitch shows with changing class names
+- DE: Notfall-Modus blendet jetzt auch Twitchs Werbe-Knöpfe aus („Werbung ⓘ“, „Weitere Informationen“), die Twitch mit wechselnden Klassennamen anzeigt
+
 ## [2.0.0] – 2026-10-17
 
 **EN**

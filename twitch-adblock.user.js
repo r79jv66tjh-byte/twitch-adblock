@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Adblock (Stream + Banner)
 // @namespace    local.twitch-adblock
-// @version      2.0.0
+// @version      2.0.1
 // @description  Bypasses pre-/mid-roll ads in the Twitch stream (playlist swap) and hides ad banners. Ad counter with time saved, emergency mode, DE/EN.
 // @description:de Umgeht Pre-/Mid-Roll-Werbung im Twitch-Stream (Playlist-Austausch) und blendet Werbebanner aus. Werbe-Zähler mit gesparter Zeit, Notfall-Modus, DE/EN.
 // @license      MIT
@@ -526,6 +526,7 @@
       box-shadow: 0 0 0 1px rgba(0, 220, 130, 0.7);
     }
     video.ttv-ab-blur { filter: blur(40px) brightness(0.35) !important; }
+    .ttv-ab-adui { visibility: hidden !important; }
     .ttv-ab-veil {
       position: absolute; inset: 0; z-index: 9999;
       display: flex; align-items: center; justify-content: center; text-align: center;
@@ -555,7 +556,7 @@
   // Zähler-Box mit Panel, Melde-Funktion, Statistik und Einstellungen
   // (alles im localStorage von twitch.tv gespeichert)
   // ---------------------------------------------------------------------------
-  const VERSION = '2.0.0';
+  const VERSION = '2.0.1';
   const REPO_URL = 'https://github.com/r79jv66tjh-byte/twitch-adblock';
   const RAW_URL = 'https://raw.githubusercontent.com/r79jv66tjh-byte/twitch-adblock/main/twitch-adblock.user.js';
   const ISSUE_URL = REPO_URL + '/issues/new?template=bug_report.yml';
@@ -574,8 +575,8 @@
 
   // Kurzinfo „Was ist neu“ zur aktuellen Version
   const WHATS_NEW = {
-    de: 'Dev-Modus, Update-Hinweis, „Fehler melden“, Bild-Reparatur, Verlauf & Kanal-Statistik, Tastenkürzel, Sichern/Wiederherstellen',
-    en: 'dev mode, update notice, "report a problem", picture repair, history & channel stats, keyboard shortcuts, backup/restore',
+    de: 'Notfall-Modus blendet jetzt auch Twitchs Werbe-Knöpfe („Werbung ⓘ“, „Weitere Informationen“) aus',
+    en: 'emergency mode now also hides Twitch\'s ad buttons ("Ad ⓘ", "Learn more")',
   };
 
   // Datum in Ortszeit (für „Heute“ und den Verlauf)
@@ -1767,7 +1768,20 @@
   let lastLeak = 0;
   const emergency = { active: false, videos: new Map() }; // video -> war vorher stumm?
 
+  // Twitch zeigt zur Werbung zusätzlich Knöpfe („Werbung ⓘ“, „Weitere Informationen“)
+  // mit wechselnden Klassennamen – daher am Text erkennen und nur während der Werbung ausblenden
+  const AD_UI_TEXT = /^(werbung|anzeige|ad|ads|weitere informationen|mehr erfahren|learn more)$/i;
+  function hideAdControls() {
+    const player = document.querySelector('[data-a-target="video-player"]') || document.querySelector('.video-player');
+    if (!player) return;
+    for (const e of player.querySelectorAll('button, a, p, span')) {
+      if (e.children.length > 2 || !AD_UI_TEXT.test((e.textContent || '').trim())) continue;
+      (e.closest('button, a') || e).classList.add('ttv-ab-adui');
+    }
+  }
+
   function emergencyOn() {
+    hideAdControls();
     for (const v of document.querySelectorAll('video')) {
       if (!emergency.videos.has(v)) emergency.videos.set(v, v.muted);
       if (!v.muted) v.muted = true; // Twitch könnte den Ton wieder anschalten – jede Runde prüfen
@@ -1788,6 +1802,7 @@
     }
     emergency.videos.clear();
     for (const veil of document.querySelectorAll('.ttv-ab-veil')) veil.remove();
+    for (const e of document.querySelectorAll('.ttv-ab-adui')) e.classList.remove('ttv-ab-adui');
     emergency.active = false;
   }
 
