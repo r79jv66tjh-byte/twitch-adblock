@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Adblock (Stream + Banner)
 // @namespace    local.twitch-adblock
-// @version      2.1.0
+// @version      2.1.1
 // @description  Bypasses pre-/mid-roll ads in the Twitch stream (playlist swap) and hides ad banners. Ad counter with time saved, emergency mode, DE/EN.
 // @description:de Umgeht Pre-/Mid-Roll-Werbung im Twitch-Stream (Playlist-Austausch) und blendet Werbebanner aus. Werbe-Zähler mit gesparter Zeit, Notfall-Modus, DE/EN.
 // @license      MIT
@@ -82,25 +82,26 @@
 
     const streams = new Map();     // URL der Media-Playlist -> { channel, res, fps }
     const backupCache = new Map(); // "kanal|playerType" -> { variants, time, hasAds }
-    let adActive = false;
-    let adStart = 0;
-    const adSpots = new Map(); // ID des Werbespots -> Dauer in Sekunden (aus #EXT-X-DATERANGE)
+    // Werbe-Zustand PRO Playlist: Der Player fragt oft mehrere Playlists gleichzeitig ab
+    // (z. B. zwei Qualitäten). Ein gemeinsamer Zustand würde sonst ständig hin- und herspringen.
+    const workerId = Math.random().toString(36).slice(2, 8);
+    const adStates = new Map(); // Playlist (ohne Query) -> { start, spots: Map(ID -> Dauer), clean }
 
     // Werbespots der aktuellen Pause mit ihrer Länge merken
-    function collectAdSpots(text) {
+    function collectAdSpots(state, text) {
       for (const line of text.split('\n')) {
         if (!line.startsWith('#EXT-X-DATERANGE') || !line.includes('stitched-ad')) continue;
         const id = (line.match(/[:,]ID="([^"]+)"/) || [])[1];
         const dur = parseFloat((line.match(/[:,]DURATION=([\d.]+)/) || [])[1]);
-        if (id && dur > 0) adSpots.set(id, dur);
+        if (id && dur > 0) state.spots.set(id, dur);
       }
     }
 
     // Gesparte Zeit der Pause: Summe der Spot-Längen, mindestens aber die gemessene Dauer (max. 10 min)
-    function adBreakSeconds() {
+    function adBreakSeconds(state) {
       let sum = 0;
-      for (const d of adSpots.values()) sum += d;
-      sum = Math.max(sum, (Date.now() - adStart) / 1000);
+      for (const d of state.spots.values()) sum += d;
+      sum = Math.max(sum, (Date.now() - state.start) / 1000);
       return Math.round(Math.min(sum, 600));
     }
 
@@ -333,15 +334,18 @@
           return res;
         }
         let text = await res.text();
+        const key = url.split('?')[0];
+        const src = workerId + '|' + key; // eindeutige Quelle, damit die Seite nicht doppelt zählt
+        let state = adStates.get(key);
         if (hasAds(text)) {
-          if (!adActive) {
-            adActive = true;
-            adStart = Date.now();
-            adSpots.clear();
-            loggedThisBreak.clear();
-            notify({ type: 'ad-start' });
+          if (!state) {
+            state = { start: Date.now(), spots: new Map(), clean: 0 };
+            if (!adStates.size) loggedThisBreak.clear();
+            adStates.set(key, state);
+            notify({ type: 'ad-start', src });
           }
-          collectAdSpots(text);
+          state.clean = 0;
+          collectAdSpots(state, text);
           // Playlist-Adresse nicht exakt bekannt? Dann den zuletzt geladenen Kanal nehmen
           const info = streams.get(url) || streams.get(url.split('?')[0])
             || (lastChannel ? { channel: lastChannel, res: null, fps: 0 } : null);
@@ -350,13 +354,14 @@
           if (replacement === null) logOnce('stripped', 'info', 'stripped', {});
           text = replacement !== null ? replacement.text : stripAds(text);
           notify({
-            type: 'ad', mode: replacement !== null ? 'backup' : 'stripped',
+            type: 'ad', src, mode: replacement !== null ? 'backup' : 'stripped',
             channel: info ? info.channel : null, quality: replacement ? replacement.quality : null,
           });
-        } else if (adActive) {
-          adActive = false;
-          backupCache.clear();
-          notify({ type: 'ad-end', seconds: adBreakSeconds() });
+        } else if (state && ++state.clean >= 2) {
+          // erst nach zwei werbefreien Abrufen hintereinander gilt die Pause als vorbei
+          adStates.delete(key);
+          if (!adStates.size) backupCache.clear();
+          notify({ type: 'ad-end', src, seconds: adBreakSeconds(state) });
         }
         return rebuild(res, text);
       }
@@ -379,6 +384,8 @@
       try {
         return await handleFetch(input, init);
       } catch (e) {
+        // Vom Player selbst abgebrochene Anfrage (z. B. Kanalwechsel): normal, kein Fehler
+        if (e && (e.name === 'AbortError' || /cancel|abort/i.test(String(e.message)))) throw e;
         log('error', 'exception', { message: String((e && e.message) || e) });
         return realFetch(input, init);
       }
@@ -665,7 +672,7 @@
   // Zähler-Box mit Panel, Melde-Funktion, Statistik und Einstellungen
   // (alles im localStorage von twitch.tv gespeichert)
   // ---------------------------------------------------------------------------
-  const VERSION = '2.1.0';
+  const VERSION = '2.1.1';
   const REPO_URL = 'https://github.com/r79jv66tjh-byte/twitch-adblock';
   const RAW_URL = 'https://raw.githubusercontent.com/r79jv66tjh-byte/twitch-adblock/main/twitch-adblock.user.js';
   const ISSUE_URL = REPO_URL + '/issues/new?template=bug_report.yml';
@@ -684,8 +691,8 @@
 
   // Kurzinfo „Was ist neu“ zur aktuellen Version
   const WHATS_NEW = {
-    de: '🩺 Selbsttest (Dev-Modus), Hinweise auch im Vollbild, Qualität des Ersatz-Streams, Box im Leerlauf blass, CSV-Export',
-    en: '🩺 self-test (dev mode), notices in fullscreen, replacement stream quality, box fades when idle, CSV export',
+    de: 'Behebt Hängen und Flackern bei Werbung (mehrere Playlists gleichzeitig), keine Doppelzählung mehr, schnellere Bild-Reparatur nach Werbepausen',
+    en: 'fixes freezing and flickering during ads (several playlists at once), no more double counting, faster picture repair after ad breaks',
   };
 
   // Datum in Ortszeit (für „Heute“ und den Verlauf)
@@ -1192,6 +1199,20 @@
   let workerSeen = false; // hat sich der Video-Worker in diesem Tab gemeldet?
   let lastAd = null;      // { time, channel, mode } der letzten Werbepause in diesem Tab
   let lastAdMsg = 0;      // Zeitpunkt der letzten Werbe-Meldung des Workers
+  let lastAdEnd = 0;      // Zeitpunkt, an dem die letzte Werbepause endete
+  const adBreak = { sources: new Set(), seconds: 0 }; // laufende Pause über alle Worker/Playlists
+
+  // Werbepause abschließen: einmal protokollieren, gesparte Zeit gutschreiben
+  function finishAdBreak() {
+    adBreak.sources.clear();
+    lastAdMsg = 0;
+    lastAdEnd = Date.now();
+    const seconds = adBreak.seconds;
+    logEvent('info', 'adBreak', { mode: lastAd ? lastAd.mode : null, seconds });
+    addSavedTime(seconds);
+    if (seconds > 0) showNotice(t('noticeSaved')(fmtDur(seconds)), 4000);
+    else showNotice(null);
+  }
   let notice = null;
   let noticeTimer = null;
   let ui = {};
@@ -2220,6 +2241,8 @@
 
   // Hängendes Bild reparieren: 1. zum Live-Bild springen, 2. Pause/Play, 3. Seite neu laden
   function checkFreeze() {
+    // Pause, deren Ende nie gemeldet wurde (z. B. Kanalwechsel mitten in der Werbung), abschließen
+    if (adBreak.sources.size && Date.now() - lastAdMsg > 45 * 1000) finishAdBreak();
     const v = mainVideo();
     const adRunning = Date.now() - lastAdMsg < 15 * 1000; // beim Herausschneiden steht das Bild absichtlich
     if (!settings.autoRecover || !v || !currentChannel() || v.paused || v.ended || document.hidden
@@ -2233,7 +2256,9 @@
       return;
     }
     const stuck = Date.now() - freeze.since;
-    if (freeze.step === 0 && stuck > 10 * 1000) {
+    // Direkt nach einer Werbepause (Wechsel zurück vom Ersatz-Stream) schneller reagieren
+    const firstStep = Date.now() - lastAdEnd < 30 * 1000 ? 4 * 1000 : 10 * 1000;
+    if (freeze.step === 0 && stuck > firstStep) {
       logEvent('warn', 'freeze', { seconds: Math.round(stuck / 1000) });
       showNotice(t('noticeRecover'), 4000);
       if (v.buffered.length) {
@@ -2355,23 +2380,28 @@
         logEvent(level, code, data);
       } else if (msg.type === 'ad-start') {
         lastAdMsg = Date.now();
-        lastAd = { time: Date.now(), channel: currentChannel(), mode: null };
-        countAdBreak();
+        // Mehrere Worker/Playlists melden dieselbe Pause: nur die erste Meldung zählt
+        if (!adBreak.sources.size) {
+          adBreak.seconds = 0;
+          lastAd = { time: Date.now(), channel: currentChannel(), mode: null };
+          countAdBreak();
+        }
+        adBreak.sources.add(msg.src || 'alt');
       } else if (msg.type === 'ad') {
         lastAdMsg = Date.now();
         lastAd = lastAd || { time: Date.now() };
-        lastAd.mode = msg.mode;
+        // „Ersatz-Stream“ hat Vorrang, wenn mehrere Playlists unterschiedlich behandelt werden
+        if (lastAd.mode !== 'backup' || msg.mode === 'backup') lastAd.mode = msg.mode;
+        if (msg.quality) lastAd.quality = msg.quality;
         if (msg.channel) lastAd.channel = msg.channel;
-        showNotice(msg.mode === 'backup'
-          ? (msg.quality && msg.quality !== '?' ? t('noticeBackupQ')(msg.quality) : t('noticeBackup'))
+        showNotice(lastAd.mode === 'backup'
+          ? (lastAd.quality && lastAd.quality !== '?' ? t('noticeBackupQ')(lastAd.quality) : t('noticeBackup'))
           : t('noticeStripped'));
         if (box.expanded) renderCounter();
       } else if (msg.type === 'ad-end') {
-        lastAdMsg = 0;
-        logEvent('info', 'adBreak', { mode: lastAd ? lastAd.mode : null, seconds: msg.seconds || 0 });
-        addSavedTime(msg.seconds);
-        if (msg.seconds > 0) showNotice(t('noticeSaved')(fmtDur(msg.seconds)), 4000);
-        else showNotice(null);
+        adBreak.sources.delete(msg.src || 'alt');
+        adBreak.seconds = Math.max(adBreak.seconds, msg.seconds || 0);
+        if (!adBreak.sources.size) finishAdBreak();
       }
     };
   }

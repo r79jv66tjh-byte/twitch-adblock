@@ -3,6 +3,22 @@
 🇬🇧 English / 🇩🇪 Deutsch – each entry is listed in both languages.
 Format: [Keep a Changelog](https://keepachangelog.com/), versions: [SemVer](https://semver.org/).
 
+## [2.1.1] – 2026-10-17
+
+**EN** (found via a real user log)
+- **Fixed freezing/flickering during ads:** the player requests several playlists at once (e.g. two qualities). The ad state was shared, so it flipped every 2 s between ad and no ad and kept switching between replacement stream and real stream. Now the state is kept per playlist, and an ad break only ends after two ad-free fetches in a row.
+- **No more double counting:** Twitch starts two video workers; an ad break reported by several workers/playlists is counted and credited only once.
+- **Cancelled requests** (e.g. channel switch) are no longer logged as script errors and not repeated.
+- **Faster picture repair right after an ad break** (4 s instead of 10 s); ad breaks whose end is never reported are closed after 45 s.
+- 3 new tests for these cases (10 in total).
+
+**DE** (gefunden über ein echtes Nutzer-Protokoll)
+- **Hängen/Flackern bei Werbung behoben:** Der Player fragt mehrere Playlists gleichzeitig ab (z. B. zwei Qualitäten). Der Werbe-Zustand war gemeinsam und sprang alle 2 s zwischen Werbung und keine Werbung hin und her – mit ständigem Wechsel zwischen Ersatz-Stream und echtem Stream. Jetzt gilt der Zustand pro Playlist, und eine Pause endet erst nach zwei werbefreien Abrufen hintereinander.
+- **Keine Doppelzählung mehr:** Twitch startet zwei Video-Worker; eine Pause, die mehrere Worker/Playlists melden, wird nur einmal gezählt und gutgeschrieben.
+- **Abgebrochene Anfragen** (z. B. Kanalwechsel) gelten nicht mehr als Script-Fehler und werden nicht wiederholt.
+- **Schnellere Bild-Reparatur direkt nach einer Werbepause** (4 s statt 10 s); Pausen ohne gemeldetes Ende werden nach 45 s abgeschlossen.
+- 3 neue Tests für diese Fälle (insgesamt 10).
+
 ## [2.1.0] – 2026-10-17
 
 **EN**

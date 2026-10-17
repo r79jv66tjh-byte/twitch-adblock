@@ -38,7 +38,7 @@ const TOKEN = JSON.stringify({ data: { streamPlaybackAccessToken: { value: 'tok'
 const NO_TOKEN = JSON.stringify({ data: { streamPlaybackAccessToken: null }, errors: [{ message: 'forbidden' }] });
 
 test('Werbung ohne Ersatz-Stream wird herausgeschnitten, gesparte Zeit = Summe der Spots', async () => {
-  const media = ['AD', 'AD', 'LIVE'];
+  const media = ['AD', 'AD', 'LIVE', 'LIVE'];
   const w = startWorker(async (url) => {
     url = String(url);
     if (url.includes('usher')) return resp(MASTER('https://x.ttvnw.net/v1/playlist/p.m3u8'));
@@ -47,6 +47,7 @@ test('Werbung ohne Ersatz-Stream wird herausgeschnitten, gesparte Zeit = Summe d
   });
   await self.fetch('https://usher.ttvnw.net/api/channel/hls/kanal.m3u8');
   const out = await (await self.fetch('https://x.ttvnw.net/v1/playlist/p.m3u8')).text();
+  await self.fetch('https://x.ttvnw.net/v1/playlist/p.m3u8');
   await self.fetch('https://x.ttvnw.net/v1/playlist/p.m3u8');
   await self.fetch('https://x.ttvnw.net/v1/playlist/p.m3u8');
   await wait(50);
@@ -132,6 +133,43 @@ test('VOD-Filter: nur wenn eingeschaltet, Inhalt bleibt erhalten', async () => {
     assert.equal(out.includes('https://ad/v.ts'), !vod, 'Werbung ' + (vod ? 'entfernt' : 'bleibt'));
     assert.ok(out.includes('https://vod/1.ts'), 'VOD-Inhalt bleibt');
   }
+});
+
+test('Zwei Playlists gleichzeitig (eine mit, eine ohne Werbung): kein Flackern', async () => {
+  const w = startWorker(async (url) => {
+    url = String(url);
+    if (url.includes('usher')) return resp(MASTER('https://x.ttvnw.net/v1/playlist/p.m3u8'));
+    if (url.includes('gql')) return resp(NO_TOKEN);
+    return resp(url.includes('p-720') ? LIVE : AD); // 1080p hat Werbung, 720p nicht
+  });
+  await self.fetch('https://usher.ttvnw.net/api/v2/channel/hls/kanal.m3u8');
+  for (let i = 0; i < 6; i++) {
+    await self.fetch('https://x.ttvnw.net/v1/playlist/p.m3u8');
+    await self.fetch('https://x.ttvnw.net/v1/playlist/p-720.m3u8');
+  }
+  await wait(50);
+  assert.equal(w.msgs.filter((m) => m.type === 'ad-start').length, 1, 'nur eine Werbepause');
+  assert.equal(w.msgs.filter((m) => m.type === 'ad-end').length, 0, 'kein Hin- und Herspringen');
+});
+
+test('Kurz werbefreie Playlist mitten in der Pause beendet die Pause nicht', async () => {
+  const seq = [AD, LIVE, AD, LIVE, LIVE];
+  const w = startWorker(async (url) => {
+    url = String(url);
+    if (url.includes('gql')) return resp(NO_TOKEN);
+    return resp(seq.shift());
+  });
+  for (let i = 0; i < 5; i++) await self.fetch('https://x.ttvnw.net/v1/playlist/p.m3u8');
+  await wait(50);
+  assert.equal(w.msgs.filter((m) => m.type === 'ad-start').length, 1);
+  assert.equal(w.msgs.filter((m) => m.type === 'ad-end').length, 1, 'Ende erst nach zwei werbefreien Abrufen');
+});
+
+test('Vom Player abgebrochene Anfrage ist kein Script-Fehler', async () => {
+  const w = startWorker(async () => { const e = new Error('Request cancelled'); e.name = 'AbortError'; throw e; });
+  await assert.rejects(() => self.fetch('https://x.ttvnw.net/v1/playlist/p.m3u8'));
+  await wait(50);
+  assert.ok(!w.logs().includes('exception'), 'nicht als Fehler protokolliert');
 });
 
 test('Selbsttest: Worker antwortet mit Stream-Liste und Ersatz-Stream', async () => {
