@@ -1,2 +1,2 @@
-# Lokale Claude-Code-Einstellungen und Regeln (nicht ins Repo)
-.claude/
+# Personal Claude Code settings stay local; shared hooks and agents are committed
+.claude/settings.local.json
