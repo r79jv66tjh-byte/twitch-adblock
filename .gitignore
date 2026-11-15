@@ -1,2 +1,2 @@
-# Personal Claude Code settings stay local; shared hooks and agents are committed
-.claude/settings.local.json
+# Claude Code hooks and agents are installed per user, never in this public repository
+.claude/
